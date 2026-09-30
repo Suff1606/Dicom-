@@ -1,0 +1,1747 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="DICOM">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>Просмотр DICOM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #e6ebf0; --panel: #f6f8fa; --line: #cdd5de; --text: #17202a; --muted: #586575;
+  --accent: #2c6b91; --accent-ink: #ffffff; --chip: #dde4eb;
+  --mark: #ffd24a; --warn: #b4452f;
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141a20; --panel: #1c232b; --line: #2b3541; --text: #dbe3ea; --muted: #8a98a8;
+    --accent: #80b7d9; --accent-ink: #0e1a23; --chip: #242d37; --warn: #e0826c; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141a20; --panel: #1c232b; --line: #2b3541; --text: #dbe3ea; --muted: #8a98a8;
+  --accent: #80b7d9; --accent-ink: #0e1a23; --chip: #242d37; --warn: #e0826c; color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { height: 100%; scroll-padding-top: env(safe-area-inset-top, 0px); }
+body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.4;
+  display: flex; flex-direction: column; overflow: hidden; -webkit-font-smoothing: antialiased; }
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 17px; font-weight: 600; margin: 0 auto 0 0; letter-spacing: -0.01em; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 460px) { .dirlabel { display: none; } header h1 { font-size: 15.5px; } }
+@media (max-width: 400px) { header h1 { display: none; } header .btn.primary { margin-right: auto; } }
+.btn { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 6px 12px; min-height: 36px; display: inline-flex; align-items: center; gap: 6px; }
+.vh { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip: rect(0 0 0 0); pointer-events: none; }
+label.btn { cursor: pointer; -webkit-tap-highlight-color: transparent; user-select: none; }
+label.btn:active { filter: brightness(0.92); }
+#status { color: #cfe3f1; font-size: 14px; margin: 0 0 14px; }
+#status.err { color: #f0a08d; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 500; }
+.btn.icon { padding: 6px; width: 36px; justify-content: center; }
+.btn svg { width: 18px; height: 18px; flex: none; }
+
+#strip { display: flex; gap: 8px; padding: 8px 12px; overflow-x: auto; background: var(--panel); border-bottom: 1px solid var(--line); scrollbar-width: thin; }
+#strip:empty { display: none; }
+.series { flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; border-radius: 8px; border: 1px solid var(--line); background: var(--chip); max-width: 220px; text-align: left; }
+.series canvas { width: 44px; height: 44px; border-radius: 5px; background: #000; flex: none; }
+.series span { display: block; font-size: 13px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.series small { color: var(--muted); font-size: 12px; }
+.series[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+
+#viewport { position: relative; flex: 1; min-height: 0; background: #000; overflow: hidden; }
+#panes { position: absolute; inset: 0; display: grid; gap: 2px; background: #29323c; }
+#panes[data-n="1"] { grid-template: "a" 1fr / 1fr; }
+#panes[data-n="2"] { grid-template: "a" 1fr "b" 1fr / 1fr; }
+#panes[data-n="3"] { grid-template: "a a" 1.25fr "b c" 1fr / 1fr 1fr; }
+@media (orientation: landscape) {
+  #panes[data-n="2"] { grid-template: "a b" 1fr / 1fr 1fr; }
+  #panes[data-n="3"] { grid-template: "a b" 1fr "a c" 1fr / 1.35fr 1fr; }
+}
+.pane { position: relative; background: #000; overflow: hidden; min-width: 0; min-height: 0; }
+.pane:nth-child(1) { grid-area: a; } .pane:nth-child(2) { grid-area: b; } .pane:nth-child(3) { grid-area: c; }
+.pane canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; display: block; }
+#panes:not([data-n="1"]) .pane.active::after { content: ""; position: absolute; inset: 0; border: 2px solid var(--pc); pointer-events: none; }
+.pdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--pc); margin-right: 5px; vertical-align: 1px; }
+.pempty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #7f909f; font-size: 13px; text-align: center; padding: 12px; pointer-events: none; }
+.ov.dl, .ov.dr, .ov.dt, .ov.db { font-weight: 600; color: #bcd3e6; font-size: 12px; }
+.ov.dl { left: 5px; top: 50%; transform: translateY(-50%); } .ov.dr { right: 5px; top: 50%; transform: translateY(-50%); }
+.ov.dt { top: 5px; left: 50%; transform: translateX(-50%); } .ov.db { bottom: 5px; left: 50%; transform: translateX(-50%); }
+#panes:not([data-n="1"]) .ov { font-size: 11.5px; }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; flex: none; }
+.seg button { border: 0; background: var(--bg); width: 34px; height: 34px; display: flex; align-items: center; justify-content: center; padding: 0; color: var(--muted); }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button svg { width: 18px; height: 18px; fill: currentColor; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.sdots { display: flex; flex-direction: column; gap: 3px; margin-left: -2px; }
+.sdots i { width: 7px; height: 7px; border-radius: 50%; display: block; }
+.ov { position: absolute; color: #e8edf2; font-size: 12.5px; line-height: 1.35; pointer-events: none; font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 3px #000, 0 0 2px #000; max-width: 48%; overflow-wrap: anywhere; }
+.ov.tl { top: 8px; left: 10px; max-width: 42%; } .ov.tr { top: 8px; right: 10px; text-align: right; max-width: 42%; }
+.ov.bl { bottom: 8px; left: 10px; } .ov.br { bottom: 8px; right: 10px; text-align: right; }
+#hint { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); background: rgba(20, 26, 32, 0.88); color: #eef3f7;
+  padding: 6px 12px; border-radius: 16px; font-size: 13px; max-width: calc(100% - 24px); text-align: center; pointer-events: none;
+  transition: opacity 0.2s; opacity: 0; }
+#hint.show { opacity: 1; }
+
+#empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; color: #cfd8e0; }
+#empty .box { max-width: 420px; text-align: center; border: 1.5px dashed #3b4856; border-radius: 14px; padding: 28px 22px; }
+#empty.drag .box { border-color: #80b7d9; background: rgba(128, 183, 217, 0.08); }
+#empty h2 { font-size: 21px; font-weight: 600; margin: 0 0 8px; color: #f0f4f7; letter-spacing: -0.01em; }
+#empty p { margin: 0 0 16px; color: #9fb0bf; font-size: 14px; }
+#empty .row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 16px; }
+#empty .btn { background: #1c232b; border-color: #36434f; color: #e3e9ee; }
+#empty .btn.primary { background: #80b7d9; color: #0e1a23; border-color: #80b7d9; }
+#empty .note { font-size: 12.5px; color: #7f909f; margin: 0; }
+
+#nav { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--panel); border-top: 1px solid var(--line); }
+#nav input[type=range] { flex: 1; accent-color: var(--accent); min-width: 0; }
+#pos { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); min-width: 64px; text-align: right; }
+
+#tools { display: flex; gap: 4px; padding: 6px 8px; overflow-x: auto; background: var(--panel); border-top: 1px solid var(--line); scrollbar-width: none; }
+#tools::-webkit-scrollbar { display: none; }
+.tool { flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 58px; padding: 6px 6px 4px;
+  border: 0; border-radius: 8px; background: transparent; font-size: 11.5px; color: var(--muted); }
+.tool svg { width: 22px; height: 22px; }
+.tool[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.tool:hover:not([aria-pressed="true"]) { background: var(--chip); color: var(--text); }
+.sep { flex: none; width: 1px; background: var(--line); margin: 6px 4px; }
+.presetwrap { flex: none; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 0 6px; font-size: 11.5px; color: var(--muted); }
+.presetwrap select { border: 1px solid var(--line); background: var(--bg); border-radius: 7px; padding: 3px 6px; font-size: 13px; max-width: 150px; }
+
+dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--text); padding: 0;
+  width: min(560px, calc(100vw - 24px)); max-height: calc(100% - 48px); }
+dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+.dlg { padding: 18px 20px; overflow: auto; }
+.dlg h3 { margin: 0 0 12px; font-size: 18px; font-weight: 600; }
+.dlg h4 { margin: 18px 0 6px; font-size: 14px; font-weight: 600; }
+.dlg table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.dlg td { padding: 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.dlg td:first-child { color: var(--muted); width: 42%; padding-right: 12px; }
+.dlg p, .dlg li { font-size: 14px; color: var(--muted); max-width: 70ch; }
+.dlg ul { padding-left: 18px; margin: 6px 0; }
+.dlg label { display: flex; gap: 8px; align-items: center; margin: 12px 0 4px; font-size: 14px; }
+.dlg .end { display: flex; justify-content: flex-end; margin-top: 16px; }
+kbd { font-family: inherit; font-size: 12px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
+.hidden { display: none !important; }
+@media (min-width: 900px) { .ov { font-size: 13.5px; } }
+@media (prefers-reduced-motion: reduce) { #hint { transition: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Просмотр DICOM</h1>
+  <label class="btn primary" for="fileIn" id="openBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 16V4m0 0L7 9m5-5 5 5M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2"/></svg>Открыть</label>
+  <label class="btn dirpick" for="dirIn" id="dirBtn" title="Открыть папку, например с диска исследования"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4l2 2.5h9A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/></svg><span class="dirlabel">Папка</span></label>
+  <div class="seg hidden" id="layoutSeg" role="group" aria-label="Число окон">
+    <button type="button" data-layout="1" aria-label="Одно окно"><svg viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="14" rx="1.5"/></svg></button>
+    <button type="button" data-layout="2" aria-label="Два окна"><svg viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="6.2" rx="1.2"/><rect x="3" y="10.8" width="14" height="6.2" rx="1.2"/></svg></button>
+    <button type="button" data-layout="3" aria-label="Три окна"><svg viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="7" rx="1.2"/><rect x="3" y="11.6" width="6.2" height="5.4" rx="1.2"/><rect x="10.8" y="11.6" width="6.2" height="5.4" rx="1.2"/></svg></button>
+  </div>
+  <button class="btn icon" id="infoBtn" type="button" aria-label="Сведения об исследовании"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/></svg></button>
+  <input type="file" id="fileIn" class="vh" multiple tabindex="-1">
+  <input type="file" id="dirIn" class="vh" webkitdirectory multiple tabindex="-1">
+</header>
+
+<div id="strip" role="toolbar" aria-label="Серии"></div>
+
+<main id="viewport">
+  <div id="panes" data-n="1"></div>
+  <div id="hint" role="status" aria-live="polite"></div>
+  <div id="empty">
+    <div class="box">
+      <h2>Откройте исследование</h2>
+      <p>Выберите ZIP-архив со снимками, отдельные файлы DICOM или папку с диска пациента.</p>
+      <div class="row">
+        <label class="btn primary" for="fileIn">Выбрать архив или файлы</label>
+        <label class="btn dirpick" for="dirIn">Выбрать папку</label>
+      </div>
+      <p id="status" class="hidden" role="status" aria-live="polite"></p>
+      <p class="note">Файлы обрабатываются только в этом браузере и никуда не отправляются.</p>
+    </div>
+  </div>
+</main>
+
+<div id="nav" class="hidden">
+  <button class="btn icon" id="prev" type="button" aria-label="Предыдущий срез"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 6-6 6 6 6"/></svg></button>
+  <input type="range" id="slider" min="0" max="0" value="0" aria-label="Срез">
+  <button class="btn icon" id="next" type="button" aria-label="Следующий срез"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg></button>
+  <span id="pos"></span>
+</div>
+
+<nav id="tools" class="hidden" aria-label="Инструменты">
+  <button class="tool" data-tool="scroll" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M5 9h11v11H5z"/><path d="M8 6h11v11" /><path d="M11 3h11" opacity=".6"/></svg>Листать</button>
+  <button class="tool" data-tool="wl" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor"/></svg>Окно</button>
+  <button class="tool" data-tool="pan" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18M12 3l-2.5 2.5M12 3l2.5 2.5M12 21l-2.5-2.5M12 21l2.5-2.5M3 12l2.5-2.5M3 12l2.5 2.5M21 12l-2.5-2.5M21 12l-2.5 2.5"/></svg>Сдвиг</button>
+  <button class="tool" data-tool="zoom" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5M10.5 7.5v6M7.5 10.5h6"/></svg>Масштаб</button>
+  <button class="tool" data-tool="cross" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="6.5"/><path d="M12 2.5v5M12 16.5v5M2.5 12h5M16.5 12h5"/></svg>Прицел</button>
+  <button class="tool" data-tool="ruler" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="m3 16.5 13.5-13.5 4.5 4.5L7.5 21z"/><path d="m7 12.5 2 2M10 9.5l2 2M13 6.5l2 2" stroke-linecap="round"/></svg>Линейка</button>
+  <button class="tool" data-tool="cobb" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6.5 21 4M3 20l18-5.5"/><path d="M14 5a6 6 0 0 1 1 5" stroke-dasharray="2 2"/></svg>Угол Кобба</button>
+  <span class="sep"></span>
+  <button class="tool" id="autoBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3" y="3" width="18" height="9" rx="1.5"/><rect x="3" y="14" width="8" height="7" rx="1.5"/><rect x="13" y="14" width="8" height="7" rx="1.5"/></svg>Проекции</button>
+  <button class="tool" id="linkBtn" type="button" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>Связь</button>
+  <span class="sep"></span>
+  <label class="presetwrap">Окно
+    <select id="preset" aria-label="Предустановка окна">
+      <option value="file">Из файла</option>
+      <option value="auto">Весь диапазон</option>
+      <optgroup label="КТ">
+        <option value="400,1800">Кость</option>
+        <option value="40,400">Мягкие ткани</option>
+        <option value="1000,4000">Металл, импланты</option>
+        <option value="40,80">Головной мозг</option>
+        <option value="-600,1500">Лёгкие</option>
+      </optgroup>
+      <option value="custom" hidden>Своё</option>
+    </select>
+  </label>
+  <button class="tool" id="invertBtn" type="button" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 20 20 4v14a2 2 0 0 1-2 2z" fill="currentColor"/></svg>Инверсия</button>
+  <button class="tool" id="clearBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M5 7h14M10 7V4.5h4V7M7 7l1 13h8l1-13"/></svg>Стереть</button>
+  <button class="tool" id="resetBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.5-5.8M4 4v4.5h4.5"/></svg>Сброс</button>
+</nav>
+
+<dialog id="infoDlg">
+  <div class="dlg">
+    <h3>Сведения</h3>
+    <div id="infoBody"><p>Исследование пока не открыто.</p></div>
+    <label><input type="checkbox" id="phi"> Скрыть данные пациента на экране</label>
+    <h4>Управление</h4>
+    <ul>
+      <li>Колесо мыши или стрелки <kbd>↑</kbd> <kbd>↓</kbd> листают срезы, <kbd>Ctrl</kbd> + колесо меняет масштаб.</li>
+      <li>Правая кнопка мыши всегда меняет окно, средняя сдвигает изображение.</li>
+      <li>На телефоне двумя пальцами можно увеличивать и сдвигать изображение.</li>
+      <li>Проекции: открывает рядом сагиттальную, аксиальную и корональную плоскости. Цветная линия на снимке показывает, где проходит срез из окна того же цвета.</li>
+      <li>Прицел: коснитесь точки на любом снимке, и остальные окна перейдут к срезу через эту точку. Её положение отмечено розовым крестиком.</li>
+      <li>Связь: окна в одной плоскости (например, T1 и T2 сагиттально) листаются вместе.</li>
+      <li>Если в исследовании есть только тонкие срезы (до 3,5 мм) в одной плоскости, остальные плоскости строятся автоматически (МПР). Клавиши <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> переключают число окон.</li>
+      <li>Угол Кобба: проведите линию вдоль первой замыкательной пластинки, затем вдоль второй. <kbd>Esc</kbd> отменяет, <kbd>Del</kbd> удаляет последнюю разметку.</li>
+      <li>Размеры считаются по Pixel Spacing. Значок ≈ означает, что есть только шаг детектора (рентген): реальный размер обычно чуть меньше из-за увеличения.</li>
+    </ul>
+    <h4>Поддерживаемые форматы</h4>
+    <p>ZIP-архивы (в том числе вложенные и с русскими именами), несжатые файлы (Implicit/Explicit VR, Little/Big Endian), RLE, JPEG Lossless (часто встречается на дисках из ПАКС) и JPEG Baseline. JPEG 2000 и JPEG-LS пока не читаются: такие файлы можно пересохранить без сжатия.</p>
+    <p>Для диагностики используйте сертифицированную рабочую станцию.</p>
+    <div class="end"><button class="btn primary" type="button" id="closeInfo">Закрыть</button></div>
+  </div>
+</dialog>
+
+<script>
+!function(f){typeof module!='undefined'&&typeof exports=='object'?module.exports=f():typeof define!='undefined'&&define.amd?define(f):(typeof self!='undefined'?self:this).fflate=f()}(function(){var _e={};"use strict";_e.deflate=zt,_e.deflateSync=kt,_e.inflate=At,_e.inflateSync=Tt,_e.gzip=It,_e.compress=It,_e.gzipSync=Ut,_e.compressSync=Ut,_e.gunzip=Zt,_e.gunzipSync=qt,_e.zlib=Lt,_e.zlibSync=Bt,_e.unzlib=Nt,_e.unzlibSync=Pt,_e.gzip=It,_e.compress=It,_e.decompress=Jt,_e.decompressSync=Kt,_e.strToU8=nn,_e.strFromU8=rn,_e.zip=dn,_e.zipSync=gn,_e.unzip=zn,_e.unzipSync=kn;var t=(typeof module!='undefined'&&typeof exports=='object'?function(_f){"use strict";var e,r,t,n=";var __w=require('worker_threads');__w.parentPort.on('message',function(m){onmessage({data:m})}),postMessage=function(m,t){__w.parentPort.postMessage(m,t)},close=process.exit;self=global";try{e=require("worker_threads"),r=e.Worker,t=e.isMarkedAsUntransferable}catch(e){}exports.default=r?function(e,o,a,s,u){var i=!1,l=new r(e+n,{eval:!0}).on("error",function(e){return u(e,null)}).on("message",function(e){return u(null,e)}).on("exit",function(e){e&&!i&&u(Error("exited with code "+e),null)});return t&&(s=s.filter(function(e){return!t(e)})),l.postMessage(a,s),l.terminate=function(){return i=!0,r.prototype.terminate.call(l)},l}:function(e,r,t,n,o){setImmediate(function(){return o(Error("async operations unsupported - update to Node 12+ (or Node 10-11 with the --experimental-worker CLI flag)"),null)});var a=function(){};return{terminate:a,postMessage:a}};return _f}:function(_f){"use strict";var e={};_f.default=function(r,t,s,a,n){var o=new Worker(e[t]||(e[t]=URL.createObjectURL(new Blob([r+';addEventListener("error",function(e){e=e.error;postMessage({$e$:[e.message,e.code,e.stack]})})'],{type:"text/javascript"}))));return o.onmessage=function(e){var r=e.data,t=r.$e$;if(t){var s=Error(t[0]);s.code=t[1],s.stack=t[2],n(s,null)}else n(null,r)},o.postMessage(s,a),o};return _f})({}),n=Uint8Array,r=Uint16Array,i=Int32Array,e=new n([0,0,0,0,0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,0,0,0,0]),o=new n([0,0,0,0,1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9,10,10,11,11,12,12,13,13,0,0]),s=new n([16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15]),a=function(t,n){for(var e=new r(31),o=0;o<31;++o)e[o]=n+=1<<t[o-1];var s=new i(e[30]);for(o=1;o<30;++o)for(var a=e[o];a<e[o+1];++a)s[a]=a-e[o]<<5|o;return{b:e,r:s}},u=a(e,2),h=u.b,f=u.r;h[28]=258,f[258]=28;for(var c=a(o,0),l=c.b,p=c.r,v=new r(32768),d=0;d<32768;++d){var g=(43690&d)>>1|(21845&d)<<1;v[d]=((65280&(g=(61680&(g=(52428&g)>>2|(13107&g)<<2))>>4|(3855&g)<<4))>>8|(255&g)<<8)>>1}var y=function(t,n,i){for(var e=t.length,o=0,s=new r(n);o<e;++o)t[o]&&++s[t[o]-1];var a,u=new r(n);for(o=1;o<n;++o)u[o]=u[o-1]+s[o-1]<<1;if(i){a=new r(1<<n);var h=15-n;for(o=0;o<e;++o)if(t[o])for(var f=o<<4|t[o],c=n-t[o],l=u[t[o]-1]++<<c,p=l|(1<<c)-1;l<=p;++l)a[v[l]>>h]=f}else for(a=new r(e),o=0;o<e;++o)t[o]&&(a[o]=v[u[t[o]-1]++]>>15-t[o]);return a},m=new n(288);for(d=0;d<144;++d)m[d]=8;for(d=144;d<256;++d)m[d]=9;for(d=256;d<280;++d)m[d]=7;for(d=280;d<288;++d)m[d]=8;var b=new n(32);for(d=0;d<32;++d)b[d]=5;var w=y(m,9,0),x=y(m,9,1),z=y(b,5,0),k=y(b,5,1),M=function(t){for(var n=t[0],r=1;r<t.length;++r)t[r]>n&&(n=t[r]);return n},S=function(t,n,r){var i=n/8|0;return(t[i]|t[i+1]<<8)>>(7&n)&r},A=function(t,n){var r=n/8|0;return(t[r]|t[r+1]<<8|t[r+2]<<16)>>(7&n)},T=function(t){return(t+7)/8|0},D=function(t,r,i){return(null==r||r<0)&&(r=0),(null==i||i>t.length)&&(i=t.length),new n(t.subarray(r,i))};_e.FlateErrorCode={UnexpectedEOF:0,InvalidBlockType:1,InvalidLengthLiteral:2,InvalidDistance:3,StreamFinished:4,NoStreamHandler:5,InvalidHeader:6,NoCallback:7,InvalidUTF8:8,ExtraFieldTooLong:9,InvalidDate:10,FilenameTooLong:11,StreamFinishing:12,InvalidZipData:13,UnknownCompressionMethod:14};var C=["unexpected EOF","invalid block type","invalid length/literal","invalid distance","stream finished","no stream handler",,"no callback","invalid UTF-8 data","extra field too long","date not in range 1980-2099","filename too long","stream finishing","invalid zip data"],I=function(t,n,r){var i=Error(n||C[t]);if(i.code=t,Error.captureStackTrace&&Error.captureStackTrace(i,I),!r)throw i;return i},U=function(t,r,i,a){var u=t.length,f=a?a.length:0;if(!u||r.f&&!r.l)return i||new n(0);var c=!i,p=c||2!=r.i,v=r.i;c&&(i=new n(3*u));var d=function(t){var r=i.length;if(t>r){var e=new n(Math.max(2*r,t));e.set(i),i=e}},g=r.f||0,m=r.p||0,b=r.b||0,w=r.l,z=r.d,C=r.m,U=r.n,F=8*u;do{if(!w){g=S(t,m,1);var E=S(t,m+1,3);if(m+=3,!E){var Z=t[(Y=T(m)+4)-4]|t[Y-3]<<8,q=Y+Z;if(q>u){v&&I(0);break}p&&d(b+Z),i.set(t.subarray(Y,q),b),r.b=b+=Z,r.p=m=8*q,r.f=g;continue}if(1==E)w=x,z=k,C=9,U=5;else if(2==E){var O=S(t,m,31)+257,G=S(t,m+10,15)+4,L=O+S(t,m+5,31)+1;m+=14;for(var B=new n(L),H=new n(19),j=0;j<G;++j)H[s[j]]=S(t,m+3*j,7);m+=3*G;var N=M(H),P=(1<<N)-1,V=y(H,N,1);for(j=0;j<L;){var Y,J=V[S(t,m,P)];if(m+=15&J,(Y=J>>4)<16)B[j++]=Y;else{var K=0,Q=0;for(16==Y?(Q=3+S(t,m,3),m+=2,K=B[j-1]):17==Y?(Q=3+S(t,m,7),m+=3):18==Y&&(Q=11+S(t,m,127),m+=7);Q--;)B[j++]=K}}var R=B.subarray(0,O),W=B.subarray(O);C=M(R),U=M(W),w=y(R,C,1),z=y(W,U,1)}else I(1);if(m>F){v&&I(0);break}}p&&d(b+131072);for(var X=(1<<C)-1,$=(1<<U)-1,_=m;;_=m){var tt=(K=w[A(t,m)&X])>>4;if((m+=15&K)>F){v&&I(0);break}if(K||I(2),tt<256)i[b++]=tt;else{if(256==tt){_=m,w=null;break}var nt=tt-254;tt>264&&(nt=S(t,m,(1<<(et=e[j=tt-257]))-1)+h[j],m+=et);var rt=z[A(t,m)&$],it=rt>>4;if(rt||I(3),m+=15&rt,W=l[it],it>3){var et=o[it];W+=A(t,m)&(1<<et)-1,m+=et}if(m>F){v&&I(0);break}p&&d(b+131072);var ot=b+nt;if(b<W){var st=f-W,at=Math.min(W,ot);for(st+b<0&&I(3);b<at;++b)i[b]=a[st+b]}for(;b<ot;++b)i[b]=i[b-W]}}r.l=w,r.p=_,r.b=b,r.f=g,w&&(g=1,r.m=C,r.d=z,r.n=U)}while(!g);return b!=i.length&&c?D(i,0,b):i.subarray(0,b)},F=function(t,n,r){var i=n/8|0;t[i]|=r<<=7&n,t[i+1]|=r>>8},E=function(t,n,r){var i=n/8|0;t[i]|=r<<=7&n,t[i+1]|=r>>8,t[i+2]|=r>>16},Z=function(t,i){for(var e=[],o=0;o<t.length;++o)t[o]&&e.push({s:o,f:t[o]});var s=e.length,a=e.slice();if(!s)return{t:j,l:0};if(1==s){var u=new n(e[0].s+1);return u[e[0].s]=1,{t:u,l:1}}e.sort(function(t,n){return t.f-n.f}),e.push({s:-1,f:25001});var h=e[0],f=e[1],c=0,l=1,p=2;for(e[0]={s:-1,f:h.f+f.f,l:h,r:f};l!=s-1;)h=e[e[c].f<e[p].f?c++:p++],f=e[c!=l&&e[c].f<e[p].f?c++:p++],e[l++]={s:-1,f:h.f+f.f,l:h,r:f};var v=a[0].s;for(o=1;o<s;++o)a[o].s>v&&(v=a[o].s);var d=new r(v+1),g=q(e[l-1],d,0);if(g>i){o=0;var y=0,m=g-i,b=1<<m;for(a.sort(function(t,n){return d[n.s]-d[t.s]||t.f-n.f});o<s;++o){var w=a[o].s;if(!(d[w]>i))break;y+=b-(1<<g-d[w]),d[w]=i}for(y>>=m;y>0;){var x=a[o].s;d[x]<i?y-=1<<i-d[x]++-1:++o}for(;o>=0&&y;--o){var z=a[o].s;d[z]==i&&(--d[z],++y)}g=i}return{t:new n(d),l:g}},q=function(t,n,r){return-1==t.s?Math.max(q(t.l,n,r+1),q(t.r,n,r+1)):n[t.s]=r},O=function(t){for(var n=t.length;n&&!t[--n];);for(var i=new r(++n),e=0,o=t[0],s=1,a=function(t){i[e++]=t},u=1;u<=n;++u)if(t[u]==o&&u!=n)++s;else{if(!o&&s>2){for(;s>138;s-=138)a(32754);s>2&&(a(s>10?s-11<<5|28690:s-3<<5|12305),s=0)}else if(s>3){for(a(o),--s;s>6;s-=6)a(8304);s>2&&(a(s-3<<5|8208),s=0)}for(;s--;)a(o);s=1,o=t[u]}return{c:i.subarray(0,e),n:n}},G=function(t,n){for(var r=0,i=0;i<n.length;++i)r+=t[i]*n[i];return r},L=function(t,n,r){var i=r.length,e=T(n+2);t[e]=255&i,t[e+1]=i>>8,t[e+2]=255^t[e],t[e+3]=255^t[e+1];for(var o=0;o<i;++o)t[e+o+4]=r[o];return 8*(e+4+i)},B=function(t,n,i,a,u,h,f,c,l,p,v){F(n,v++,i),++u[256];for(var d=Z(u,15),g=d.t,x=d.l,k=Z(h,15),M=k.t,S=k.l,A=O(g),T=A.c,D=A.n,C=O(M),I=C.c,U=C.n,q=new r(19),B=0;B<T.length;++B)++q[31&T[B]];for(B=0;B<I.length;++B)++q[31&I[B]];for(var H=Z(q,7),j=H.t,N=H.l,P=19;P>4&&!j[s[P-1]];--P);var V,Y,J,K,Q=p+5<<3,R=G(u,m)+G(h,b)+f,W=G(u,g)+G(h,M)+f+14+3*P+G(q,j)+2*q[16]+3*q[17]+7*q[18];if(l>=0&&Q<=R&&Q<=W)return L(n,v,t.subarray(l,l+p));if(F(n,v,1+(W<R)),v+=2,W<R){V=y(g,x,0),Y=g,J=y(M,S,0),K=M;var X=y(j,N,0);for(F(n,v,D-257),F(n,v+5,U-1),F(n,v+10,P-4),v+=14,B=0;B<P;++B)F(n,v+3*B,j[s[B]]);v+=3*P;for(var $=[T,I],_=0;_<2;++_){var tt=$[_];for(B=0;B<tt.length;++B)F(n,v,X[rt=31&tt[B]]),v+=j[rt],rt>15&&(F(n,v,tt[B]>>5&127),v+=tt[B]>>12)}}else V=w,Y=m,J=z,K=b;for(B=0;B<c;++B){var nt=a[B];if(nt>255){var rt;E(n,v,V[257+(rt=nt>>18&31)]),v+=Y[rt+257],rt>7&&(F(n,v,nt>>23&31),v+=e[rt]);var it=31&nt;E(n,v,J[it]),v+=K[it],it>3&&(E(n,v,nt>>5&8191),v+=o[it])}else E(n,v,V[nt]),v+=Y[nt]}return E(n,v,V[256]),v+Y[256]},H=new i([65540,131080,131088,131104,262176,1048704,1048832,2114560,2117632]),j=new n(0),N=function(t,s,a,u,h,c){var l=c.z||t.length,v=new n(u+l+5*(1+Math.ceil(l/7e3))+h),d=v.subarray(u,v.length-h),g=c.l,y=7&(c.r||0);if(s){y&&(d[0]=c.r>>3);for(var m=H[s-1],b=m>>13,w=8191&m,x=(1<<a)-1,z=c.p||new r(32768),k=c.h||new r(x+1),M=Math.ceil(a/3),S=2*M,A=function(n){return(t[n]^t[n+1]<<M^t[n+2]<<S)&x},C=new i(25e3),I=new r(288),U=new r(32),F=0,E=0,Z=c.i||0,q=0,O=c.w||0,G=0;Z+2<l;++Z){var j=A(Z),N=32767&Z,P=k[j];if(z[N]=P,k[j]=N,O<=Z){var V=l-Z;if((F>7e3||q>24576)&&(V>423||!g)){y=B(t,d,0,C,I,U,E,q,G,Z-G,y),q=F=E=0,G=Z;for(var Y=0;Y<286;++Y)I[Y]=0;for(Y=0;Y<30;++Y)U[Y]=0}var J=2,K=0,Q=w,R=N-P&32767;if(V>2&&j==A(Z-R))for(var W=Math.min(b,V)-1,X=Math.min(32767,Z),$=Math.min(258,V);R<=X&&--Q&&N!=P;){if(t[Z+J]==t[Z+J-R]){for(var _=0;_<$&&t[Z+_]==t[Z+_-R];++_);if(_>J){if(J=_,K=R,_>W)break;var tt=Math.min(R,_-2),nt=0;for(Y=0;Y<tt;++Y){var rt=Z-R+Y&32767,it=rt-z[rt]&32767;it>nt&&(nt=it,P=rt)}}}R+=(N=P)-(P=z[N])&32767}if(K){C[q++]=268435456|f[J]<<18|p[K];var et=31&f[J],ot=31&p[K];E+=e[et]+o[ot],++I[257+et],++U[ot],O=Z+J,++F}else C[q++]=t[Z],++I[t[Z]]}}for(Z=Math.max(Z,O);Z<l;++Z)C[q++]=t[Z],++I[t[Z]];y=B(t,d,g,C,I,U,E,q,G,Z-G,y),g||(c.r=7&y|d[y/8|0]<<3,y-=7,c.h=k,c.p=z,c.i=Z,c.w=O)}else{for(Z=c.w||0;Z<l+g;Z+=65535){var st=Z+65535;st>=l&&(d[y/8|0]=g,st=l),y=L(d,y+1,t.subarray(Z,st))}c.i=l}return D(v,0,u+T(y)+h)},P=function(){for(var t=new Int32Array(256),n=0;n<256;++n){for(var r=n,i=9;--i;)r=(1&r&&-306674912)^r>>>1;t[n]=r}return t}(),V=function(){var t=-1;return{p:function(n){for(var r=t,i=0;i<n.length;++i)r=P[255&r^n[i]]^r>>>8;t=r},d:function(){return~t}}},Y=function(){var t=1,n=0;return{p:function(r){for(var i=t,e=n,o=0|r.length,s=0;s!=o;){for(var a=Math.min(s+2655,o);s<a;++s)e+=i+=r[s];i=(65535&i)+15*(i>>16),e=(65535&e)+15*(e>>16)}t=i,n=e},d:function(){return(255&(t%=65521))<<24|(65280&t)<<8|(255&(n%=65521))<<8|n>>8}}},J=function(t,r,i,e,o){if(!o&&(o={l:1},r.dictionary)){var s=r.dictionary.subarray(-32768),a=new n(s.length+t.length);a.set(s),a.set(t,s.length),t=a,o.w=s.length}return N(t,null==r.level?6:r.level,null==r.mem?o.l?Math.ceil(1.5*Math.max(8,Math.min(13,Math.log(t.length)))):20:12+r.mem,i,e,o)},K=function(t,n){var r={};for(var i in t)r[i]=t[i];for(var i in n)r[i]=n[i];return r},Q=function(t,n,r){for(var i=t(),e=""+t,o=e.slice(e.indexOf("[")+1,e.lastIndexOf("]")).replace(/\s+/g,"").split(","),s=0;s<i.length;++s){var a=i[s],u=o[s];if("function"==typeof a){n+=";"+u+"=";var h=""+a;if(a.prototype)if(-1!=h.indexOf("[native code]")){var f=h.indexOf(" ",8)+1;n+=h.slice(f,h.indexOf("(",f))}else for(var c in n+=h,a.prototype)n+=";"+u+".prototype."+c+"="+a.prototype[c];else n+=h}else r[u]=a}return n},R=[],W=function(t){var n=[];for(var r in t)t[r].buffer&&n.push((t[r]=new t[r].constructor(t[r])).buffer);return n},X=function(n,r,i,e){if(!R[i]){for(var o="",s={},a=n.length-1,u=0;u<a;++u)o=Q(n[u],o,s);R[i]={c:Q(n[a],o,s),e:s}}var h=K({},R[i].e);return(0,t.default)(R[i].c+";onmessage=function(e){for(var k in e.data)self[k]=e.data[k];onmessage="+r+"}",i,h,W(h),e)},$=function(){return[n,r,i,e,o,s,h,l,x,k,v,C,y,M,S,A,T,D,I,U,Tt,et,ot]},_=function(){return[n,r,i,e,o,s,f,p,w,m,z,b,v,H,j,y,F,E,Z,q,O,G,L,B,T,D,N,J,kt,et]},tt=function(){return[pt,gt,lt,V,P]},nt=function(){return[vt,dt]},rt=function(){return[yt,lt,Y]},it=function(){return[mt]},et=function(t){return postMessage(t,[t.buffer])},ot=function(t){return t&&{out:t.size&&new n(t.size),dictionary:t.dictionary}},st=function(t,n,r,i,e,o){var s=X(r,i,e,function(t,n){s.terminate(),o(t,n)});return s.postMessage([t,n],n.consume?[t.buffer]:[]),function(){s.terminate()}},at=function(t){return t.ondata=function(t,n){return postMessage([t,n],[t.buffer])},function(n){n.data[0]?(t.push(n.data[0],n.data[1]),postMessage([n.data[0].length])):t.flush(n.data[1])}},ut=function(t,n,r,i,e,o,s){var a,u=X(t,i,e,function(t,r){t?(u.terminate(),n.ondata.call(n,t)):Array.isArray(r)?1==r.length?(n.queuedSize-=r[0],n.ondrain&&n.ondrain(r[0])):(r[1]&&u.terminate(),n.ondata.call(n,t,r[0],r[1])):s(r)});u.postMessage(r),n.queuedSize=0,n.push=function(t,r){n.ondata||I(5),a&&n.ondata(I(4,0,1),null,!!r),n.queuedSize+=t.length,u.postMessage([t,a=r],t.buffer instanceof ArrayBuffer?[t.buffer]:[])},n.terminate=function(){u.terminate()},o&&(n.flush=function(t){u.postMessage([0,t])})},ht=function(t,n){return t[n]|t[n+1]<<8},ft=function(t,n){return(t[n]|t[n+1]<<8|t[n+2]<<16|t[n+3]<<24)>>>0},ct=function(t,n){return ft(t,n)+4294967296*ft(t,n+4)},lt=function(t,n,r){for(;r;++n)t[n]=r,r>>>=8},pt=function(t,n){var r=n.filename;if(t[0]=31,t[1]=139,t[2]=8,t[8]=n.level<2?4:9==n.level?2:0,t[9]=3,0!=n.mtime&&lt(t,4,Math.floor(new Date(n.mtime||Date.now())/1e3)),r){t[3]=8;for(var i=0;i<=r.length;++i)t[i+10]=r.charCodeAt(i)}},vt=function(t){31==t[0]&&139==t[1]&&8==t[2]||I(6,"invalid gzip data");var n=t[3],r=10;4&n&&(r+=2+(t[10]|t[11]<<8));for(var i=(n>>3&1)+(n>>4&1);i>0;i-=!t[r++]);return r+(2&n)},dt=function(t){var n=t.length;return(t[n-4]|t[n-3]<<8|t[n-2]<<16|t[n-1]<<24)>>>0},gt=function(t){return 10+(t.filename?t.filename.length+1:0)},yt=function(t,n){var r=n.level,i=0==r?0:r<6?1:9==r?3:2;if(t[0]=120,t[1]=i<<6|(n.dictionary&&32),t[1]|=31-(t[0]<<8|t[1])%31,n.dictionary){var e=Y();e.p(n.dictionary),lt(t,2,e.d())}},mt=function(t,n){return(8!=(15&t[0])||t[0]>>4>7||(t[0]<<8|t[1])%31)&&I(6,"invalid zlib data"),(t[1]>>5&1)==+!n&&I(6,"invalid zlib data: "+(32&t[1]?"need":"unexpected")+" dictionary"),2+(t[1]>>3&4)};function bt(t,n){return"function"==typeof t&&(n=t,t={}),this.ondata=n,t}var wt=function(){function t(t,r){if("function"==typeof t&&(r=t,t={}),this.ondata=r,this.o=t||{},this.s={l:0,i:32768,w:32768,z:32768},this.b=new n(98304),this.o.dictionary){var i=this.o.dictionary.subarray(-32768);this.b.set(i,32768-i.length),this.s.i=32768-i.length}}return t.prototype.p=function(t,n){this.ondata(J(t,this.o,0,0,this.s),n)},t.prototype.push=function(t,r){this.ondata||I(5),this.s.l&&I(4);var i=t.length+this.s.z;if(i>this.b.length){if(i>2*this.b.length-32768){var e=new n(-32768&i);e.set(this.b.subarray(0,this.s.z)),this.b=e}var o=this.b.length-this.s.z;this.b.set(t.subarray(0,o),this.s.z),this.s.z=this.b.length,this.p(this.b,!1),this.b.set(this.b.subarray(-32768)),this.b.set(t.subarray(o),32768),this.s.z=t.length-o+32768,this.s.i=32766,this.s.w=32768}else this.b.set(t,this.s.z),this.s.z+=t.length;this.s.l=1&r,(this.s.z>this.s.w+8191||r)&&(this.p(this.b,r||!1),this.s.w=this.s.i,this.s.i-=2),r&&(this.s=this.o={},this.b=j)},t.prototype.flush=function(t){if(this.ondata||I(5),this.s.l&&I(4),this.p(this.b,!1),this.s.w=this.s.i,this.s.i-=2,t){var r=new n(6);r[0]=this.s.r>>3;var i=L(r,this.s.r,j);this.s.r=0,this.ondata(r.subarray(0,i>>3),!1)}},t}();_e.Deflate=wt;var xt=function(){return function(t,n){ut([_,function(){return[at,wt]}],this,bt.call(this,t,n),function(t){var n=new wt(t.data);onmessage=at(n)},6,1)}}();function zt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[_],function(t){return et(kt(t.data[0],t.data[1]))},0,r)}function kt(t,n){return J(t,n||{},0,0)}_e.AsyncDeflate=xt;var Mt=function(){function t(t,r){"function"==typeof t&&(r=t,t={}),this.ondata=r;var i=t&&t.dictionary&&t.dictionary.subarray(-32768);this.s={i:0,b:i?i.length:0},this.o=new n(32768),this.p=new n(0),i&&this.o.set(i)}return t.prototype.e=function(t){if(this.ondata||I(5),this.d&&I(4),this.p.length){if(t.length){var r=new n(this.p.length+t.length);r.set(this.p),r.set(t,this.p.length),this.p=r}}else this.p=t},t.prototype.c=function(t){this.s.i=+(this.d=t||!1);var n=this.s.b,r=U(this.p,this.s,this.o);this.ondata(D(r,n,this.s.b),this.d),this.o=D(r,this.s.b-32768),this.s.b=this.o.length,this.p=D(this.p,this.s.p/8|0),this.s.p&=7},t.prototype.push=function(t,n){this.e(t),this.c(n)},t}();_e.Inflate=Mt;var St=function(){return function(t,n){ut([$,function(){return[at,Mt]}],this,bt.call(this,t,n),function(t){var n=new Mt(t.data);onmessage=at(n)},7,0)}}();function At(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[$],function(t){return et(Tt(t.data[0],ot(t.data[1])))},1,r)}function Tt(t,n){return U(t,{i:2},n&&n.out,n&&n.dictionary)}_e.AsyncInflate=St;var Dt=function(){function t(t,n){this.c=V(),this.l=0,this.v=1,wt.call(this,t,n)}return t.prototype.push=function(t,n){this.c.p(t),this.l+=t.length,wt.prototype.push.call(this,t,n)},t.prototype.p=function(t,n){var r=J(t,this.o,this.v&&gt(this.o),n&&8,this.s);this.v&&(pt(r,this.o),this.v=0),n&&(lt(r,r.length-8,this.c.d()),lt(r,r.length-4,this.l)),this.ondata(r,n)},t.prototype.flush=function(t){wt.prototype.flush.call(this,t)},t}();_e.Gzip=Dt,_e.Compress=Dt;var Ct=function(){return function(t,n){ut([_,tt,function(){return[at,wt,Dt]}],this,bt.call(this,t,n),function(t){var n=new Dt(t.data);onmessage=at(n)},8,1)}}();function It(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[_,tt,function(){return[Ut]}],function(t){return et(Ut(t.data[0],t.data[1]))},2,r)}function Ut(t,n){n||(n={});var r=V(),i=t.length;r.p(t);var e=J(t,n,gt(n),8),o=e.length;return pt(e,n),lt(e,o-8,r.d()),lt(e,o-4,i),e}_e.AsyncGzip=Ct,_e.AsyncCompress=Ct;var Ft=function(){function t(t,n){this.v=1,this.r=0,Mt.call(this,t,n)}return t.prototype.push=function(t,r){if(Mt.prototype.e.call(this,t),this.r+=t.length,this.v){var i=this.p.subarray(this.v-1),e=i.length>3?vt(i):4;if(e>i.length){if(!r)return}else this.v>1&&this.onmember&&this.onmember(this.r-i.length);this.p=i.subarray(e),this.v=0}Mt.prototype.c.call(this,0),this.s.f&&!this.s.l?(this.v=T(this.s.p)+9,this.s={i:0},this.o=new n(0),this.push(new n(0),r)):r&&Mt.prototype.c.call(this,r)},t}();_e.Gunzip=Ft;var Et=function(){return function(t,n){var r=this;ut([$,nt,function(){return[at,Mt,Ft]}],this,bt.call(this,t,n),function(t){var n=new Ft(t.data);n.onmember=function(t){return postMessage(t)},onmessage=at(n)},9,0,function(t){return r.onmember&&r.onmember(t)})}}();function Zt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[$,nt,function(){return[qt]}],function(t){return et(qt(t.data[0],t.data[1]))},3,r)}function qt(t,r){var i=vt(t);return i+8>t.length&&I(6,"invalid gzip data"),U(t.subarray(i,-8),{i:2},r&&r.out||new n(dt(t)),r&&r.dictionary)}_e.AsyncGunzip=Et;var Ot=function(){function t(t,n){this.c=Y(),this.v=1,wt.call(this,t,n)}return t.prototype.push=function(t,n){this.c.p(t),wt.prototype.push.call(this,t,n)},t.prototype.p=function(t,n){var r=J(t,this.o,this.v&&(this.o.dictionary?6:2),n&&4,this.s);this.v&&(yt(r,this.o),this.v=0),n&&lt(r,r.length-4,this.c.d()),this.ondata(r,n)},t.prototype.flush=function(t){wt.prototype.flush.call(this,t)},t}();_e.Zlib=Ot;var Gt=function(){return function(t,n){ut([_,rt,function(){return[at,wt,Ot]}],this,bt.call(this,t,n),function(t){var n=new Ot(t.data);onmessage=at(n)},10,1)}}();function Lt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[_,rt,function(){return[Bt]}],function(t){return et(Bt(t.data[0],t.data[1]))},4,r)}function Bt(t,n){n||(n={});var r=Y();r.p(t);var i=J(t,n,n.dictionary?6:2,4);return yt(i,n),lt(i,i.length-4,r.d()),i}_e.AsyncZlib=Gt;var Ht=function(){function t(t,n){Mt.call(this,t,n),this.v=t&&t.dictionary?2:1}return t.prototype.push=function(t,n){if(Mt.prototype.e.call(this,t),this.v){if(this.p.length<6&&!n)return;this.p=this.p.subarray(mt(this.p,this.v-1)),this.v=0}n&&(this.p.length<4&&I(6,"invalid zlib data"),this.p=this.p.subarray(0,-4)),Mt.prototype.c.call(this,n)},t}();_e.Unzlib=Ht;var jt=function(){return function(t,n){ut([$,it,function(){return[at,Mt,Ht]}],this,bt.call(this,t,n),function(t){var n=new Ht(t.data);onmessage=at(n)},11,0)}}();function Nt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),st(t,n,[$,it,function(){return[Pt]}],function(t){return et(Pt(t.data[0],ot(t.data[1])))},5,r)}function Pt(t,n){return U(t.subarray(mt(t,n&&n.dictionary),-4),{i:2},n&&n.out,n&&n.dictionary)}_e.AsyncUnzlib=jt;var Vt=function(){function t(t,n){this.o=bt.call(this,t,n)||{},this.G=Ft,this.I=Mt,this.Z=Ht}return t.prototype.i=function(){var t=this;this.s.ondata=function(n,r){t.ondata(n,r)}},t.prototype.push=function(t,r){if(this.ondata||I(5),this.s)this.s.push(t,r);else{if(this.p&&this.p.length){var i=new n(this.p.length+t.length);i.set(this.p),i.set(t,this.p.length)}else this.p=t;this.p.length>2&&(this.s=31==this.p[0]&&139==this.p[1]&&8==this.p[2]?new this.G(this.o):8!=(15&this.p[0])||this.p[0]>>4>7||(this.p[0]<<8|this.p[1])%31?new this.I(this.o):new this.Z(this.o),this.i(),this.s.push(this.p,r),this.p=null)}},t}();_e.Decompress=Vt;var Yt=function(){function t(t,n){Vt.call(this,t,n),this.queuedSize=0,this.G=Et,this.I=St,this.Z=jt}return t.prototype.i=function(){var t=this;this.s.ondata=function(n,r,i){t.ondata(n,r,i)},this.s.ondrain=function(n){t.queuedSize-=n,t.ondrain&&t.ondrain(n)}},t.prototype.push=function(t,n){this.queuedSize+=t.length,Vt.prototype.push.call(this,t,n)},t}();function Jt(t,n,r){return r||(r=n,n={}),"function"!=typeof r&&I(7),31==t[0]&&139==t[1]&&8==t[2]?Zt(t,n,r):8!=(15&t[0])||t[0]>>4>7||(t[0]<<8|t[1])%31?At(t,n,r):Nt(t,n,r)}function Kt(t,n){return 31==t[0]&&139==t[1]&&8==t[2]?qt(t,n):8!=(15&t[0])||t[0]>>4>7||(t[0]<<8|t[1])%31?Tt(t,n):Pt(t,n)}_e.AsyncDecompress=Yt;var Qt=function(t,r,i,e){for(var o in t){var s=t[o],a=r+o,u=e;Array.isArray(s)&&(u=K(e,s[1]),s=s[0]),ArrayBuffer.isView(s)?i[a]=[s,u]:(i[a+="/"]=[new n(0),u],Qt(s,a,i,e))}},Rt="undefined"!=typeof TextEncoder&&new TextEncoder,Wt="undefined"!=typeof TextDecoder&&new TextDecoder,Xt=0;try{Wt.decode(j,{stream:!0}),Xt=1}catch(t){}var $t=function(t){for(var n="",r=0;;){var i=t[r++],e=(i>127)+(i>223)+(i>239);if(r+e>t.length)return{s:n,r:D(t,r-1)};e?3==e?(i=((15&i)<<18|(63&t[r++])<<12|(63&t[r++])<<6|63&t[r++])-65536,n+=String.fromCharCode(55296|i>>10,56320|1023&i)):n+=String.fromCharCode(1&e?(31&i)<<6|63&t[r++]:(15&i)<<12|(63&t[r++])<<6|63&t[r++]):n+=String.fromCharCode(i)}},_t=function(){function t(t){this.ondata=t,Xt?this.t=new TextDecoder:this.p=j}return t.prototype.push=function(t,r){if(this.ondata||I(5),r=!!r,this.t)return this.ondata(this.t.decode(t,{stream:!0}),r),void(r&&(this.t.decode().length&&I(8),this.t=null));this.p||I(4);var i=new n(this.p.length+t.length);i.set(this.p),i.set(t,this.p.length);var e=$t(i),o=e.s,s=e.r;r?(s.length&&I(8),this.p=null):this.p=s,this.ondata(o,r)},t}();_e.DecodeUTF8=_t;var tn=function(){function t(t){this.ondata=t}return t.prototype.push=function(t,n){this.ondata||I(5),this.d&&I(4),this.ondata(nn(t),this.d=n||!1)},t}();function nn(t,r){if(r){for(var i=new n(t.length),e=0;e<t.length;++e)i[e]=t.charCodeAt(e);return i}if(Rt)return Rt.encode(t);var o=t.length,s=new n(t.length+(t.length>>1)),a=0,u=function(t){s[a++]=t};for(e=0;e<o;++e){if(a+5>s.length){var h=new n(a+8+(o-e<<1));h.set(s),s=h}var f=t.charCodeAt(e);f<128||r?u(f):f<2048?(u(192|f>>6),u(128|63&f)):f>55295&&f<57344?(u(240|(f=65536+(1047552&f)|1023&t.charCodeAt(++e))>>18),u(128|f>>12&63),u(128|f>>6&63),u(128|63&f)):(u(224|f>>12),u(128|f>>6&63),u(128|63&f))}return D(s,0,a)}function rn(t,n){if(n){for(var r="",i=0;i<t.length;i+=16384)r+=String.fromCharCode.apply(null,t.subarray(i,i+16384));return r}if(Wt)return Wt.decode(t);var e=$t(t),o=e.s;return(r=e.r).length&&I(8),o}_e.EncodeUTF8=tn;var en=function(t){return 1==t?3:t<6?2:9==t?1:0},on=function(t,n){return n+30+ht(t,n+26)+ht(t,n+28)},sn=function(t,n,r){var i=ht(t,n+28),e=ht(t,n+30),o=rn(t.subarray(n+46,n+46+i),!(2048&ht(t,n+8))),s=n+46+i,a=an(t,s,e,r,ft(t,n+20),ft(t,n+24),ft(t,n+42)),u=a[0],h=a[1],f=a[2];return[ht(t,n+10),u,h,o,s+e+ht(t,n+32),f]},an=function(t,n,r,i,e,o,s){var a=4294967295==e,u=4294967295==o,h=4294967295==s,f=n+r;if(i&&a+u+h){for(;n+4<f;n+=4+ht(t,n+2))if(1==ht(t,n))return[a?ct(t,n+4+8*u):e,u?ct(t,n+4):o,h?ct(t,n+4+8*(u+a)):s,1];i<2&&I(13)}return[e,o,s,0]},un=function(t){var n=0;if(t)for(var r in t){var i=t[r].length;i>65535&&I(9),n+=i+4}return n},hn=function(t,n,r,i,e,o,s,a){var u=i.length,h=r.extra,f=a&&a.length,c=un(h);lt(t,n,null!=s?33639248:67324752),n+=4,null!=s&&(t[n++]=20,t[n++]=r.os),t[n]=20,n+=2,t[n++]=r.flag<<1|(o<0&&8),t[n++]=e&&8,t[n++]=255&r.compression,t[n++]=r.compression>>8;var l=new Date(null==r.mtime?Date.now():r.mtime),p=l.getFullYear()-1980;if((p<0||p>119)&&I(10),lt(t,n,p<<25|l.getMonth()+1<<21|l.getDate()<<16|l.getHours()<<11|l.getMinutes()<<5|l.getSeconds()>>1),n+=4,-1!=o&&(lt(t,n,r.crc),lt(t,n+4,o<0?-o-2:o),lt(t,n+8,r.size)),lt(t,n+12,u),lt(t,n+14,c),n+=16,null!=s&&(lt(t,n,f),lt(t,n+6,r.attrs),lt(t,n+10,s),n+=14),t.set(i,n),n+=u,c)for(var v in h){var d=h[v],g=d.length;lt(t,n,+v),lt(t,n+2,g),t.set(d,n+4),n+=4+g}return f&&(t.set(a,n),n+=f),n},fn=function(t,n,r,i,e){lt(t,n,101010256),lt(t,n+8,r),lt(t,n+10,r),lt(t,n+12,i),lt(t,n+16,e)},cn=function(){function t(t){this.filename=t,this.c=V(),this.size=0,this.compression=0}return t.prototype.process=function(t,n){this.ondata(null,t,n)},t.prototype.push=function(t,n){this.ondata||I(5),this.c.p(t),this.size+=t.length,n&&(this.crc=this.c.d()),this.process(t,n||!1)},t}();_e.ZipPassThrough=cn;var ln=function(){function t(t,n){var r=this;n||(n={}),cn.call(this,t),this.d=new wt(n,function(t,n){r.ondata(null,t,n)}),this.compression=8,this.flag=en(n.level)}return t.prototype.process=function(t,n){try{this.d.push(t,n)}catch(t){this.ondata(t,null,n)}},t.prototype.push=function(t,n){cn.prototype.push.call(this,t,n)},t}();_e.ZipDeflate=ln;var pn=function(){function t(t,n){var r=this;n||(n={}),cn.call(this,t),this.d=new xt(n,function(t,n,i){r.ondata(t,n,i)}),this.compression=8,this.flag=en(n.level),this.terminate=this.d.terminate}return t.prototype.process=function(t,n){this.d.push(t,n)},t.prototype.push=function(t,n){cn.prototype.push.call(this,t,n)},t}();_e.AsyncZipDeflate=pn;var vn=function(){function t(t){this.ondata=t,this.u=[],this.d=1}return t.prototype.add=function(t){var r=this;if(this.ondata||I(5),2&this.d)this.ondata(I(4+8*(1&this.d),0,1),null,!1);else{var i=nn(t.filename),e=i.length,o=t.comment,s=o&&nn(o),a=e!=t.filename.length||s&&o.length!=s.length,u=e+un(t.extra)+30;e>65535&&this.ondata(I(11,0,1),null,!1);var h=new n(u);hn(h,0,t,i,a,-1);var f=[h],c=function(){for(var t=0,n=f;t<n.length;t++)r.ondata(null,n[t],!1);f=[]},l=this.d;this.d=0;var p=this.u.length,v=K(t,{f:i,u:a,o:s,t:function(){t.terminate&&t.terminate()},r:function(){if(c(),l){var t=r.u[p+1];t?t.r():r.d=1}l=1}}),d=0;t.ondata=function(i,e,o){if(i)r.ondata(i,e,o),r.terminate();else if(d+=e.length,f.push(e),o){var s=new n(16);lt(s,0,134695760),lt(s,4,t.crc),lt(s,8,d),lt(s,12,t.size),f.push(s),v.c=d,v.b=u+d+16,v.crc=t.crc,v.size=t.size,l&&v.r(),l=1}else l&&c()},this.u.push(v)}},t.prototype.end=function(){var t=this;2&this.d?this.ondata(I(4+8*(1&this.d),0,1),null,!0):(this.d?this.e():this.u.push({r:function(){1&t.d&&(t.u.splice(-1,1),t.e())},t:function(){}}),this.d=3)},t.prototype.e=function(){for(var t=0,r=0,i=0,e=0,o=this.u;e<o.length;e++)i+=46+(h=o[e]).f.length+un(h.extra)+(h.o?h.o.length:0);for(var s=new n(i+22),a=0,u=this.u;a<u.length;a++){var h;hn(s,t,h=u[a],h.f,h.u,-h.c-2,r,h.o),t+=46+h.f.length+un(h.extra)+(h.o?h.o.length:0),r+=h.b}fn(s,t,this.u.length,i,r),this.ondata(null,s,!0),this.d=2},t.prototype.terminate=function(){for(var t=0,n=this.u;t<n.length;t++)n[t].t();this.d=2},t}();function dn(t,r,i){i||(i=r,r={}),"function"!=typeof i&&I(7);var e={};Qt(t,"",e,r);var o=Object.keys(e),s=o.length,a=0,u=0,h=s,f=Array(s),c=[],l=function(){for(var t=0;t<c.length;++t)c[t]()},p=function(t,n){xn(function(){i(t,n)})};xn(function(){p=i});var v=function(){var t=new n(u+22),r=a,i=u-a;u=0;for(var e=0;e<h;++e){var o=f[e];try{var s=o.c.length;hn(t,u,o,o.f,o.u,s);var c=30+o.f.length+un(o.extra),l=u+c;t.set(o.c,l),hn(t,a,o,o.f,o.u,s,u,o.m),a+=16+c+(o.m?o.m.length:0),u=l+s}catch(t){return p(t,null)}}fn(t,a,f.length,i,r),p(null,t)};s||v();for(var d=function(t){var n=o[t],r=e[n],i=r[0],h=r[1],d=V(),g=i.length;d.p(i);var y=nn(n),m=y.length,b=h.comment,w=b&&nn(b),x=w&&w.length,z=un(h.extra),k=0==h.level?0:8,M=function(r,i){if(r)l(),p(r,null);else{var e=i.length;f[t]=K(h,{size:g,crc:d.d(),c:i,f:y,m:w,u:m!=n.length||w&&b.length!=x,compression:k}),a+=30+m+z+e,u+=76+2*(m+z)+(x||0)+e,--s||v()}};if(m>65535&&M(I(11,0,1),null),k)if(g<16e4)try{M(null,kt(i,h))}catch(t){M(t,null)}else c.push(zt(i,h,M));else M(null,i)},g=0;g<h;++g)d(g);return l}function gn(t,r){r||(r={});var i={},e=[];Qt(t,"",i,r);var o=0,s=0;for(var a in i){var u=i[a],h=u[0],f=u[1],c=0==f.level?0:8,l=(M=nn(a)).length,p=f.comment,v=p&&nn(p),d=v&&v.length,g=un(f.extra);l>65535&&I(11);var y=c?kt(h,f):h,m=y.length,b=V();b.p(h),e.push(K(f,{size:h.length,crc:b.d(),c:y,f:M,m:v,u:l!=a.length||v&&p.length!=d,o:o,compression:c})),o+=30+l+g+m,s+=76+2*(l+g)+(d||0)+m}for(var w=new n(s+22),x=o,z=s-o,k=0;k<e.length;++k){var M;hn(w,(M=e[k]).o,M,M.f,M.u,M.c.length);var S=30+M.f.length+un(M.extra);w.set(M.c,M.o+S),hn(w,o,M,M.f,M.u,M.c.length,M.o,M.m),o+=16+S+(M.m?M.m.length:0)}return fn(w,o,e.length,z,x),w}_e.Zip=vn;var yn=function(){function t(){}return t.prototype.push=function(t,n){this.ondata(null,t,n)},t.compression=0,t}();_e.UnzipPassThrough=yn;var mn=function(){function t(){var t=this;this.i=new Mt(function(n,r){t.ondata(null,n,r)})}return t.prototype.push=function(t,n){try{this.i.push(t,n)}catch(t){this.ondata(t,null,n)}},t.compression=8,t}();_e.UnzipInflate=mn;var bn=function(){function t(t,n){var r=this;n<32e4?this.i=new Mt(function(t,n){r.ondata(null,t,n)}):(this.i=new St(function(t,n,i){r.ondata(t,n,i)}),this.terminate=this.i.terminate)}return t.prototype.push=function(t,n){this.i.terminate&&(t=D(t,0)),this.i.push(t,n)},t.compression=8,t}();_e.AsyncUnzipInflate=bn;var wn=function(){function t(t){this.onfile=t,this.k=[],this.o={0:yn},this.p=j}return t.prototype.push=function(t,r){var i=this;if(this.onfile||I(5),this.p||I(4),this.c>0){var e=Math.min(this.c,t.length),o=t.subarray(0,e);if(this.c-=e,this.d?this.d.push(o,!this.c):this.k[0].push(o),(t=t.subarray(e)).length)return this.push(t,r)}else{var s=0,a=0,u=void 0,h=void 0;this.p.length?t.length?((h=new n(this.p.length+t.length)).set(this.p),h.set(t,this.p.length)):h=this.p:h=t;for(var f=h.length,c=this.c,l=c&&this.d,p=function(){var t=ft(h,a);if(67324752==t){s=1,u=a,v.d=null,v.c=0;var n=ht(h,a+6),r=ht(h,a+8),e=2048&n,o=8&n,l=ht(h,a+26),p=ht(h,a+28);if(f>a+30+l+p){var d=[];v.k.unshift(d),s=2;var g,y=ft(h,a+18),m=ft(h,a+22),b=rn(h.subarray(a+30,a+=30+l),!e),w=an(h,a,p,2,y,m,0),x=w[0],z=w[1];o&&(x=-1-w[3]),a+=p,v.c=x;var k={name:b,compression:r,start:function(){if(k.ondata||I(5),x){var t=i.o[r];t||k.ondata(I(14,"unknown compression type "+r,1),null,!1),(g=x<0?new t(b):new t(b,x,z)).ondata=function(t,n,r){k.ondata(t,n,r)};for(var n=0,e=d;n<e.length;n++)g.push(e[n],!1);i.k[0]==d&&i.c?i.d=g:g.push(j,!0)}else k.ondata(null,j,!0)},terminate:function(){g&&g.terminate&&g.terminate()}};x>=0&&(k.size=x,k.originalSize=z),v.onfile(k)}return"break"}if(c){if(134695760==t)return u=a+=12+(-2==c&&8),s=3,v.c=0,"break";if(33639248==t)return u=a-=4,s=3,v.c=0,"break"}},v=this;a<f-4&&"break"!==p();++a);if(this.p=j,c<0){var d=h.subarray(0,s?u-12-(-2==c&&8)-(134695760==ft(h,u-16)&&4):a);l?l.push(d,!!s):this.k[+(2==s)].push(d)}if(2&s)return this.push(h.subarray(a),r);this.p=h.subarray(a)}r&&(this.c&&I(13),this.p=null)},t.prototype.register=function(t){this.o[t.compression]=t},t}();_e.Unzip=wn;var xn="function"==typeof queueMicrotask?queueMicrotask:"function"==typeof setTimeout?setTimeout:function(t){t()};function zn(t,r,i){i||(i=r,r={}),"function"!=typeof i&&I(7);var e=[],o=function(){for(var t=0;t<e.length;++t)e[t]()},s={},a=function(t,n){xn(function(){i(t,n)})};xn(function(){a=i});for(var u=t.length-22;101010256!=ft(t,u);--u)if(!u||t.length-u>65558)return a(I(13,0,1),null),o;var h=ht(t,u+8);if(h){var f=h,c=ft(t,u+16),l=117853008==ft(t,u-20);if(l){var p=ft(t,u-12);(l=101075792==ft(t,p))&&(f=h=ft(t,p+32),c=ft(t,p+48))}for(var v=r&&r.filter,d=function(r){var i=sn(t,c,l),u=i[0],f=i[1],p=i[2],d=i[3],g=i[4],y=on(t,i[5]);c=g;var m=function(t,n){t?(o(),a(t,null)):(n&&(s[d]=n),--h||a(null,s))};if(!v||v({name:d,size:f,originalSize:p,compression:u}))if(u)if(8==u){var b=t.subarray(y,y+f);if(p<524288||f>.8*p)try{m(null,Tt(b,{out:new n(p)}))}catch(t){m(t,null)}else e.push(At(b,{size:p},m))}else m(I(14,"unknown compression type "+u,1),null);else m(null,D(t,y,y+f));else m(null,null)},g=0;g<f;++g)d()}else a(null,{});return o}function kn(t,r){for(var i={},e=t.length-22;101010256!=ft(t,e);--e)(!e||t.length-e>65558)&&I(13);var o=ht(t,e+8);if(!o)return{};var s=ft(t,e+16),a=117853008==ft(t,e-20);if(a){var u=ft(t,e-12);(a=101075792==ft(t,u))&&(o=ft(t,u+32),s=ft(t,u+48))}for(var h=r&&r.filter,f=0;f<o;++f){var c=sn(t,s,a),l=c[0],p=c[1],v=c[2],d=c[3],g=c[4],y=on(t,c[5]);s=g,h&&!h({name:d,size:p,originalSize:v,compression:l})||(l?8==l?i[d]=Tt(t.subarray(y,y+p),{out:new n(v)}):I(14,"unknown compression type "+l):i[d]=D(t,y,y+p))}return i}return _e});
+</script>
+<script>
+// ---- Minimal ZIP reader: central directory + stored/deflate entries, ZIP64, cp866/UTF-8 names ----
+const ZipReader = (() => {
+  const bytes = async (blob, a, b) => new Uint8Array(await blob.slice(a, b).arrayBuffer());
+  const utf8 = new TextDecoder('utf-8', { fatal: true });
+  let cp866 = null;
+  try { cp866 = new TextDecoder('ibm866'); } catch (_) { cp866 = new TextDecoder('windows-1252'); }
+  function decodeName(b, flags) {
+    if (flags & 0x800) return new TextDecoder('utf-8').decode(b);
+    try { return utf8.decode(b); } catch (_) { return cp866.decode(b); }
+  }
+  async function isZip(blob) {
+    if (blob.size < 22) return false;
+    const h = await bytes(blob, 0, 4);
+    return h[0] === 0x50 && h[1] === 0x4b && (h[2] === 3 || h[2] === 5) && (h[3] === 4 || h[3] === 6);
+  }
+  async function list(blob) {
+    const size = blob.size;
+    const tailLen = Math.min(size, 65535 + 22 + 20);
+    const tail = await bytes(blob, size - tailLen, size);
+    const dv = new DataView(tail.buffer);
+    let eocd = -1;
+    for (let i = tail.length - 22; i >= 0; i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    if (eocd < 0) throw new Error('zip-bad');
+    let count = dv.getUint16(eocd + 10, true), cdSize = dv.getUint32(eocd + 12, true), cdOff = dv.getUint32(eocd + 16, true);
+    if (count === 0xffff || cdSize === 0xffffffff || cdOff === 0xffffffff) {
+      const loc = eocd - 20;
+      if (loc >= 0 && dv.getUint32(loc, true) === 0x07064b50) {
+        const off = Number(dv.getBigUint64(loc + 8, true));
+        const z = await bytes(blob, off, off + 56), zd = new DataView(z.buffer);
+        if (zd.getUint32(0, true) === 0x06064b50) {
+          count = Number(zd.getBigUint64(32, true)); cdSize = Number(zd.getBigUint64(40, true)); cdOff = Number(zd.getBigUint64(48, true));
+        }
+      }
+    }
+    const cd = await bytes(blob, cdOff, cdOff + cdSize), c = new DataView(cd.buffer);
+    const out = [];
+    let p = 0;
+    for (let i = 0; i < count && p + 46 <= cd.length; i++) {
+      if (c.getUint32(p, true) !== 0x02014b50) break;
+      const flags = c.getUint16(p + 8, true), method = c.getUint16(p + 10, true);
+      let csize = c.getUint32(p + 20, true), usize = c.getUint32(p + 24, true), lho = c.getUint32(p + 42, true);
+      const nlen = c.getUint16(p + 28, true), elen = c.getUint16(p + 30, true), clen = c.getUint16(p + 32, true);
+      const name = decodeName(cd.subarray(p + 46, p + 46 + nlen), flags);
+      for (let e = p + 46 + nlen, end = e + elen; e + 4 <= end;) {
+        const id = c.getUint16(e, true), sz = c.getUint16(e + 2, true);
+        if (id === 1) {
+          let q = e + 4;
+          if (usize === 0xffffffff) { usize = Number(c.getBigUint64(q, true)); q += 8; }
+          if (csize === 0xffffffff) { csize = Number(c.getBigUint64(q, true)); q += 8; }
+          if (lho === 0xffffffff) { lho = Number(c.getBigUint64(q, true)); q += 8; }
+        }
+        e += 4 + sz;
+      }
+      if (!name.endsWith('/') && !/(^|\/)__MACOSX\//.test(name) && !/(^|\/)\._/.test(name)) {
+        out.push({ name, method, csize, usize, lho, encrypted: !!(flags & 1) });
+      }
+      p += 46 + nlen + elen + clen;
+    }
+    return out;
+  }
+  async function read(blob, en) {
+    if (en.encrypted) throw new Error('zip-encrypted');
+    const h = await bytes(blob, en.lho, en.lho + 30), hd = new DataView(h.buffer);
+    if (hd.getUint32(0, true) !== 0x04034b50) throw new Error('zip-bad');
+    const start = en.lho + 30 + hd.getUint16(26, true) + hd.getUint16(28, true);
+    const part = blob.slice(start, start + en.csize);
+    if (en.method === 0) return part.arrayBuffer();
+    if (en.method !== 8) throw new Error('zip-method');
+    if (typeof DecompressionStream !== 'undefined') {
+      try { return await new Response(part.stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer(); } catch (_) { /* fall through */ }
+    }
+    const r = fflate.inflateSync(new Uint8Array(await part.arrayBuffer()));
+    return r.buffer.slice(r.byteOffset, r.byteOffset + r.byteLength);
+  }
+  return { isZip, list, read };
+})();
+
+</script>
+<script>
+/* jpeg-lossless-decoder-js 2.1.2 (MIT) https://github.com/rii-mango/JPEGLosslessDecoderJS
+Copyright (c) 2015 RII-UTHSCSA
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+(function(){var S=Object.defineProperty;var A=(a,t)=>{for(var e in t)S(a,e,{get:t[e],enumerable:!0})};var w={hSamp:0,quantTableSel:0,vSamp:0};var b=class{buffer;index;constructor(t,e,r){this.buffer=new Uint8Array(t,e,r),this.index=0}get16(){let t=(this.buffer[this.index]<<8)+this.buffer[this.index+1];return this.index+=2,t}get8(){let t=this.buffer[this.index];return this.index+=1,t}};var x=class{dimX=0;dimY=0;numComp=0;precision=0;components=[];read(t){let e=0,r,o=t.get16();e+=2,this.precision=t.get8(),e+=1,this.dimY=t.get16(),e+=2,this.dimX=t.get16(),e+=2,this.numComp=t.get8(),e+=1;for(let s=1;s<=this.numComp;s+=1){if(e>o)throw new Error("ERROR: frame format error");let i=t.get8();if(e+=1,e>=o)throw new Error("ERROR: frame format error [c>=Lf]");r=t.get8(),e+=1,this.components[i]||(this.components[i]={...w}),this.components[i].hSamp=r>>4,this.components[i].vSamp=r&15,this.components[i].quantTableSel=t.get8(),e+=1}if(e!==o)throw new Error("ERROR: frame format error [Lf!=count]");return 1}};var k={};A(k,{crc32:()=>L,crcTable:()=>T,createArray:()=>c,makeCRCTable:()=>y});var c=(...a)=>{if(a.length>1){let t=a[0],e=a.slice(1),r=[];for(let o=0;o<t;o++)r[o]=c(...e);return r}else return Array(a[0]).fill(void 0)},y=function(){let a,t=[];for(let e=0;e<256;e++){a=e;for(let r=0;r<8;r++)a=a&1?3988292384^a>>>1:a>>>1;t[e]=a}return t},T=y(),L=function(a){let t=new Uint8Array(a),e=-1;for(let r=0;r<t.length;r++)e=e>>>8^T[(e^t[r])&255];return(e^-1)>>>0};var p=class a{static MSB=2147483648;l;th;v;tc;constructor(){this.l=c(4,2,16),this.th=[0,0,0,0],this.v=c(4,2,16,200),this.tc=[[0,0],[0,0],[0,0],[0,0]]}read(t,e){let r=0,o,s,i,n,f,u=t.get16();for(r+=2;r<u;){if(o=t.get8(),r+=1,s=o&15,s>3)throw new Error("ERROR: Huffman table ID > 3");if(i=o>>4,i>2)throw new Error("ERROR: Huffman table [Table class > 2 ]");for(this.th[s]=1,this.tc[s][i]=1,n=0;n<16;n+=1)this.l[s][i][n]=t.get8(),r+=1;for(n=0;n<16;n+=1)for(f=0;f<this.l[s][i][n];f+=1){if(r>u)throw new Error("ERROR: Huffman table format error [count>Lh]");this.v[s][i][n][f]=t.get8(),r+=1}}if(r!==u)throw new Error("ERROR: Huffman table format error [count!=Lf]");for(n=0;n<4;n+=1)for(f=0;f<2;f+=1)this.tc[n][f]!==0&&this.buildHuffTable(e[n][f],this.l[n][f],this.v[n][f]);return 1}buildHuffTable(t,e,r){let o,s,i,n,f;for(s=0,i=0;i<8;i+=1)for(n=0;n<e[i];n+=1)for(f=0;f<256>>i+1;f+=1)t[s]=r[i][n]|i+1<<8,s+=1;for(i=1;s<256;i+=1,s+=1)t[s]=i|a.MSB;for(o=1,s=0,i=8;i<16;i+=1)for(n=0;n<e[i];n+=1){for(f=0;f<256>>i-7;f+=1)t[o*256+s]=r[i][n]|i+1<<8,s+=1;if(s>=256){if(s>256)throw new Error("ERROR: Huffman table error(1)!");s=0,o+=1}}}};var d=class a{precision=[];tq=[0,0,0,0];quantTables=c(4,64);static enhanceQuantizationTable=function(t,e){for(let r=0;r<8;r+=1)t[e[0*8+r]]*=90,t[e[4*8+r]]*=90,t[e[2*8+r]]*=118,t[e[6*8+r]]*=49,t[e[5*8+r]]*=71,t[e[1*8+r]]*=126,t[e[7*8+r]]*=25,t[e[3*8+r]]*=106;for(let r=0;r<8;r+=1)t[e[0+8*r]]*=90,t[e[4+8*r]]*=90,t[e[2+8*r]]*=118,t[e[6+8*r]]*=49,t[e[5+8*r]]*=71,t[e[1+8*r]]*=126,t[e[7+8*r]]*=25,t[e[3+8*r]]*=106;for(let r=0;r<64;r+=1)t[r]>>=6};read(t,e){let r=0,o,s,i,n=t.get16();for(r+=2;r<n;){if(o=t.get8(),r+=1,s=o&15,s>3)throw new Error("ERROR: Quantization table ID > 3");if(this.precision[s]=o>>4,this.precision[s]===0)this.precision[s]=8;else if(this.precision[s]===1)this.precision[s]=16;else throw new Error("ERROR: Quantization table precision error");if(this.tq[s]=1,this.precision[s]===8){for(i=0;i<64;i+=1){if(r>n)throw new Error("ERROR: Quantization table format error");this.quantTables[s][i]=t.get8(),r+=1}a.enhanceQuantizationTable(this.quantTables[s],e)}else{for(i=0;i<64;i+=1){if(r>n)throw new Error("ERROR: Quantization table format error");this.quantTables[s][i]=t.get16(),r+=2}a.enhanceQuantizationTable(this.quantTables[s],e)}}if(r!==n)throw new Error("ERROR: Quantization table error [count!=Lq]");return 1}};var R={acTabSel:0,dcTabSel:0,scanCompSel:0};var g=class{ah=0;al=0;numComp=0;selection=0;spectralEnd=0;components=[];read(t){let e=0,r,o,s=t.get16();for(e+=2,this.numComp=t.get8(),e+=1,r=0;r<this.numComp;r+=1){if(this.components[r]={...R},e>s)throw new Error("ERROR: scan header format error");this.components[r].scanCompSel=t.get8(),e+=1,o=t.get8(),e+=1,this.components[r].dcTabSel=o>>4,this.components[r].acTabSel=o&15}if(this.selection=t.get8(),e+=1,this.spectralEnd=t.get8(),e+=1,o=t.get8(),this.ah=o>>4,this.al=o&15,e+=1,e!==s)throw new Error("ERROR: scan header format error [count!=Ns]");return 1}};var D=function(){let a=new ArrayBuffer(2);return new DataView(a).setInt16(0,256,!0),new Int16Array(a)[0]===256}(),E=class a{static IDCT_P=[0,5,40,16,45,2,7,42,21,56,8,61,18,47,1,4,41,23,58,13,32,24,37,10,63,17,44,3,6,43,20,57,15,34,29,48,53,26,39,9,60,19,46,22,59,12,33,31,50,55,25,36,11,62,14,35,28,49,52,27,38,30,51,54];static TABLE=[0,1,5,6,14,15,27,28,2,4,7,13,16,26,29,42,3,8,12,17,25,30,41,43,9,11,18,24,31,40,44,53,10,19,23,32,39,45,52,54,20,22,33,38,46,51,55,60,21,34,37,47,50,56,59,61,35,36,48,49,57,58,62,63];static MAX_HUFFMAN_SUBTREE=50;static MSB=2147483648;static RESTART_MARKER_BEGIN=65488;static RESTART_MARKER_END=65495;buffer=null;stream=null;frame=new x;huffTable=new p;quantTable=new d;scan=new g;DU=c(10,4,64);HuffTab=c(4,2,50*256);IDCT_Source=[];nBlock=[];acTab=c(10,1);dcTab=c(10,1);qTab=c(10,1);marker=0;markerIndex=0;numComp=0;restartInterval=0;selection=0;xDim=0;yDim=0;xLoc=0;yLoc=0;outputData=null;restarting=!1;mask=0;numBytes=0;precision=void 0;components=[];getter=null;setter=null;output=null;selector=null;constructor(t,e){this.buffer=t??null,this.numBytes=e??0}decompress(t,e,r){return this.decode(t,e,r).buffer}decode(t,e,r,o){let s=0,i=[],n,f,u=[],l=[],m;t&&(this.buffer=t),o!==void 0&&(this.numBytes=o),this.stream=new b(this.buffer,e,r),this.buffer=null,this.xLoc=0,this.yLoc=0;let h=this.stream.get16();if(h!==65496)throw new Error("Not a JPEG file");for(h=this.stream.get16();h>>4!==4092||h===65476;){switch(h){case 65476:this.huffTable.read(this.stream,this.HuffTab);break;case 65484:throw new Error("Program doesn't support arithmetic coding. (format throw new IOException)");case 65499:this.quantTable.read(this.stream,a.TABLE);break;case 65501:this.restartInterval=this.readNumber()??0;break;case 65504:case 65505:case 65506:case 65507:case 65508:case 65509:case 65510:case 65511:case 65512:case 65513:case 65514:case 65515:case 65516:case 65517:case 65518:case 65519:this.readApp();break;case 65534:this.readComment();break;default:if(h>>8!==255)throw new Error("ERROR: format throw new IOException! (decode)")}h=this.stream.get16()}if(h<65472||h>65479)throw new Error("ERROR: could not handle arithmetic code!");this.frame.read(this.stream),h=this.stream.get16();do{for(;h!==65498;){switch(h){case 65476:this.huffTable.read(this.stream,this.HuffTab);break;case 65484:throw new Error("Program doesn't support arithmetic coding. (format throw new IOException)");case 65499:this.quantTable.read(this.stream,a.TABLE);break;case 65501:this.restartInterval=this.readNumber()??0;break;case 65504:case 65505:case 65506:case 65507:case 65508:case 65509:case 65510:case 65511:case 65512:case 65513:case 65514:case 65515:case 65516:case 65517:case 65518:case 65519:this.readApp();break;case 65534:this.readComment();break;default:if(h>>8!==255)throw new Error("ERROR: format throw new IOException! (Parser.decode)")}h=this.stream.get16()}switch(this.precision=this.frame.precision,this.components=this.frame.components,this.numBytes||(this.numBytes=Math.round(Math.ceil(this.precision/8))),this.numBytes===1?this.mask=255:this.mask=65535,this.scan.read(this.stream),this.numComp=this.scan.numComp,this.selection=this.scan.selection,this.numBytes===1?this.numComp===3?(this.getter=this.getValueRGB,this.setter=this.setValueRGB,this.output=this.outputRGB):(this.getter=this.getValue8,this.setter=this.setValue8,this.output=this.outputSingle):(this.getter=this.getValue8,this.setter=this.setValue8,this.output=this.outputSingle),this.selection){case 2:this.selector=this.select2;break;case 3:this.selector=this.select3;break;case 4:this.selector=this.select4;break;case 5:this.selector=this.select5;break;case 6:this.selector=this.select6;break;case 7:this.selector=this.select7;break;default:this.selector=this.select1;break}for(n=0;n<this.numComp;n+=1)f=this.scan.components[n].scanCompSel,this.qTab[n]=this.quantTable.quantTables[this.components[f].quantTableSel],this.nBlock[n]=this.components[f].vSamp*this.components[f].hSamp,this.dcTab[n]=this.HuffTab[this.scan.components[n].dcTabSel][0],this.acTab[n]=this.HuffTab[this.scan.components[n].acTabSel][1];for(this.xDim=this.frame.dimX,this.yDim=this.frame.dimY,this.numBytes===1?this.outputData=new Uint8Array(new ArrayBuffer(this.xDim*this.yDim*this.numBytes*this.numComp)):this.outputData=new Uint16Array(new ArrayBuffer(this.xDim*this.yDim*this.numBytes*this.numComp)),s+=1;;){for(u[0]=0,l[0]=0,n=0;n<10;n+=1)i[n]=1<<this.precision-1;if(this.restartInterval===0){for(h=this.decodeUnit(i,u,l);h===0&&this.xLoc<this.xDim&&this.yLoc<this.yDim;)this.output(i),h=this.decodeUnit(i,u,l);break}for(m=0;m<this.restartInterval&&(this.restarting=m===0,h=this.decodeUnit(i,u,l),this.output(i),h===0);m+=1);if(h===0&&(this.markerIndex!==0?(h=65280|this.marker,this.markerIndex=0):h=this.stream.get16()),!(h>=a.RESTART_MARKER_BEGIN&&h<=a.RESTART_MARKER_END))break}h===65500&&s===1&&(this.readNumber(),h=this.stream.get16())}while(h!==65497&&this.xLoc<this.xDim&&this.yLoc<this.yDim&&s===0);return this.outputData}decodeUnit(t,e,r){return this.numComp===1?this.decodeSingle(t,e,r):this.numComp===3?this.decodeRGB(t,e,r):-1}select1(t){return this.getPreviousX(t)}select2(t){return this.getPreviousY(t)}select3(t){return this.getPreviousXY(t)}select4(t){return this.getPreviousX(t)+this.getPreviousY(t)-this.getPreviousXY(t)}select5(t){return this.getPreviousX(t)+(this.getPreviousY(t)-this.getPreviousXY(t)>>1)}select6(t){return this.getPreviousY(t)+(this.getPreviousX(t)-this.getPreviousXY(t)>>1)}select7(t){return(this.getPreviousX(t)+this.getPreviousY(t))/2}decodeRGB(t,e,r){if(this.selector===null)throw new Error("decode hasn't run yet");let o,s,i,n,f,u,l;for(t[0]=this.selector(0),t[1]=this.selector(1),t[2]=this.selector(2),n=0;n<this.numComp;n+=1)for(i=this.qTab[n],o=this.acTab[n],s=this.dcTab[n],f=0;f<this.nBlock[n];f+=1){for(u=0;u<this.IDCT_Source.length;u+=1)this.IDCT_Source[u]=0;let m=this.getHuffmanValue(s,e,r);if(m>=65280)return m;for(t[n]=this.IDCT_Source[0]=t[n]+this.getn(r,m,e,r),this.IDCT_Source[0]*=i[0],l=1;l<64;l+=1){if(m=this.getHuffmanValue(o,e,r),m>=65280)return m;if(l+=m>>4,m&15)this.IDCT_Source[a.IDCT_P[l]]=this.getn(r,m&15,e,r)*i[l];else if(!(m>>4))break}}return 0}decodeSingle(t,e,r){if(this.selector===null)throw new Error("decode hasn't run yet");let o,s,i,n;for(this.restarting?(this.restarting=!1,t[0]=1<<this.frame.precision-1):t[0]=this.selector(),s=0;s<this.nBlock[0];s+=1){if(o=this.getHuffmanValue(this.dcTab[0],e,r),o>=65280)return o;if(i=this.getn(t,o,e,r),n=i>>8,n>=a.RESTART_MARKER_BEGIN&&n<=a.RESTART_MARKER_END)return n;t[0]+=i}return 0}getHuffmanValue(t,e,r){let o,s;if(!this.stream)throw new Error("stream not initialized");if(r[0]<8?(e[0]<<=8,s=this.stream.get8(),s===255&&(this.marker=this.stream.get8(),this.marker!==0&&(this.markerIndex=9)),e[0]|=s):r[0]-=8,o=t[e[0]>>r[0]],o&a.MSB){if(this.markerIndex!==0)return this.markerIndex=0,65280|this.marker;e[0]&=65535>>16-r[0],e[0]<<=8,s=this.stream.get8(),s===255&&(this.marker=this.stream.get8(),this.marker!==0&&(this.markerIndex=9)),e[0]|=s,o=t[(o&255)*256+(e[0]>>r[0])],r[0]+=8}if(r[0]+=8-(o>>8),r[0]<0)throw new Error("index="+r[0]+" temp="+e[0]+" code="+o+" in HuffmanValue()");return r[0]<this.markerIndex?(this.markerIndex=0,65280|this.marker):(e[0]&=65535>>16-r[0],o&255)}getn(t,e,r,o){let s,i;if(this.stream===null)throw new Error("stream not initialized");if(e===0)return 0;if(e===16)return t[0]>=0?-32768:32768;if(o[0]-=e,o[0]>=0){if(o[0]<this.markerIndex&&!this.isLastPixel())return this.markerIndex=0,(65280|this.marker)<<8;s=r[0]>>o[0],r[0]&=65535>>16-o[0]}else{if(r[0]<<=8,i=this.stream.get8(),i===255&&(this.marker=this.stream.get8(),this.marker!==0&&(this.markerIndex=9)),r[0]|=i,o[0]+=8,o[0]<0){if(this.markerIndex!==0)return this.markerIndex=0,(65280|this.marker)<<8;r[0]<<=8,i=this.stream.get8(),i===255&&(this.marker=this.stream.get8(),this.marker!==0&&(this.markerIndex=9)),r[0]|=i,o[0]+=8}if(o[0]<0)throw new Error("index="+o[0]+" in getn()");if(o[0]<this.markerIndex)return this.markerIndex=0,(65280|this.marker)<<8;s=r[0]>>o[0],r[0]&=65535>>16-o[0]}return s<1<<e-1&&(s+=(-1<<e)+1),s}getPreviousX(t=0){if(this.getter===null)throw new Error("decode hasn't run yet");return this.xLoc>0?this.getter(this.yLoc*this.xDim+this.xLoc-1,t):this.yLoc>0?this.getPreviousY(t):1<<this.frame.precision-1}getPreviousXY(t=0){if(this.getter===null)throw new Error("decode hasn't run yet");return this.xLoc>0&&this.yLoc>0?this.getter((this.yLoc-1)*this.xDim+this.xLoc-1,t):this.getPreviousY(t)}getPreviousY(t=0){if(this.getter===null)throw new Error("decode hasn't run yet");return this.yLoc>0?this.getter((this.yLoc-1)*this.xDim+this.xLoc,t):this.getPreviousX(t)}isLastPixel(){return this.xLoc===this.xDim-1&&this.yLoc===this.yDim-1}outputSingle(t){if(this.setter===null)throw new Error("decode hasn't run yet");this.xLoc<this.xDim&&this.yLoc<this.yDim&&(this.setter(this.yLoc*this.xDim+this.xLoc,this.mask&t[0]),this.xLoc+=1,this.xLoc>=this.xDim&&(this.yLoc+=1,this.xLoc=0))}outputRGB(t){if(this.setter===null)throw new Error("decode hasn't run yet");let e=this.yLoc*this.xDim+this.xLoc;this.xLoc<this.xDim&&this.yLoc<this.yDim&&(this.setter(e,t[0],0),this.setter(e,t[1],1),this.setter(e,t[2],2),this.xLoc+=1,this.xLoc>=this.xDim&&(this.yLoc+=1,this.xLoc=0))}setValue8(t,e){if(!this.outputData)throw new Error("output data not ready");D?this.outputData[t]=e:this.outputData[t]=(e&255)<<8|e>>8&255}getValue8(t){if(this.outputData===null)throw new Error("output data not ready");if(D)return this.outputData[t];{let e=this.outputData[t];return(e&255)<<8|e>>8&255}}setValueRGB(t,e,r=0){this.outputData!==null&&(this.outputData[t*3+r]=e)}getValueRGB(t,e){if(this.outputData===null)throw new Error("output data not ready");return this.outputData[t*3+e]}readApp(){if(this.stream===null)return null;let t=0,e=this.stream.get16();for(t+=2;t<e;)this.stream.get8(),t+=1;return e}readComment(){if(this.stream===null)return null;let t="",e=0,r=this.stream.get16();for(e+=2;e<r;)t+=this.stream.get8(),e+=1;return t}readNumber(){if(this.stream===null)return null;if(this.stream.get16()!==4)throw new Error("ERROR: Define number format throw new IOException [Ld!=4]");return this.stream.get16()}};globalThis.JPEGLossless={Decoder:E};
+})();
+
+</script>
+<script>
+// ---- DICOM core: parsing + pixel decoding (no dependencies except optional JPEG-lossless decoder) ----
+const DicomCore = (() => {
+  const LONG_VR = new Set(['OB', 'OD', 'OF', 'OL', 'OV', 'OW', 'SQ', 'SV', 'UC', 'UN', 'UR', 'UT', 'UV']);
+  const NUM_VR = { // VRs for tags we read numerically (needed for implicit VR files)
+    0x00280002: 'US', 0x00280006: 'US', 0x00280010: 'US', 0x00280011: 'US', 0x00280100: 'US',
+    0x00280101: 'US', 0x00280102: 'US', 0x00280103: 'US', 0x00280008: 'IS', 0x00281050: 'DS',
+    0x00281051: 'DS', 0x00281052: 'DS', 0x00281053: 'DS', 0x00280030: 'DS', 0x00181164: 'DS',
+    0x00180050: 'DS', 0x00180088: 'DS', 0x00201041: 'DS', 0x00200032: 'DS', 0x00200037: 'DS',
+    0x00200013: 'IS'
+  };
+  const CHARSETS = {
+    'ISO_IR 100': 'windows-1252', 'ISO_IR 101': 'iso-8859-2', 'ISO_IR 109': 'iso-8859-3',
+    'ISO_IR 110': 'iso-8859-4', 'ISO_IR 144': 'iso-8859-5', 'ISO_IR 127': 'iso-8859-6',
+    'ISO_IR 126': 'iso-8859-7', 'ISO_IR 138': 'iso-8859-8', 'ISO_IR 148': 'windows-1254',
+    'ISO_IR 166': 'windows-874', 'ISO_IR 13': 'shift_jis', 'ISO_IR 192': 'utf-8',
+    'GB18030': 'gb18030', 'GBK': 'gbk'
+  };
+  const isUpper = (c) => c >= 65 && c <= 90;
+
+  function parse(buffer) {
+    const n = buffer.byteLength;
+    const dv = new DataView(buffer);
+    const u8 = new Uint8Array(buffer);
+    const el = new Map();
+    let pos = 0;
+    const hasPreamble = n > 132 && u8[128] === 0x44 && u8[129] === 0x49 && u8[130] === 0x43 && u8[131] === 0x4d;
+    if (hasPreamble) pos = 132;
+    else if (n < 16) throw new Error('not-dicom');
+
+    // File meta group (always explicit little endian)
+    while (pos + 8 <= n && dv.getUint16(pos, true) === 0x0002) {
+      const e = dv.getUint16(pos + 2, true);
+      const vr = String.fromCharCode(u8[pos + 4], u8[pos + 5]);
+      let len, hdr;
+      if (LONG_VR.has(vr)) { len = dv.getUint32(pos + 8, true); hdr = 12; } else { len = dv.getUint16(pos + 6, true); hdr = 8; }
+      el.set(0x00020000 + e, { vr, off: pos + hdr, len });
+      pos += hdr + len;
+    }
+    let ts = el.has(0x00020010) ? rawStr(u8, el.get(0x00020010)) : null;
+    let explicit, little;
+    if (ts) {
+      explicit = ts !== '1.2.840.10008.1.2';
+      little = ts !== '1.2.840.10008.1.2.2';
+    } else {
+      // No meta header: guess encoding from the first element
+      if (!hasPreamble) {
+        const g = dv.getUint16(pos, true);
+        if (g !== 0x0008 && g !== 0x0010 && g !== 0x0018 && g !== 0x0020 && g !== 0x0028) throw new Error('not-dicom');
+      }
+      explicit = isUpper(u8[pos + 4]) && isUpper(u8[pos + 5]);
+      little = true;
+      ts = explicit ? '1.2.840.10008.1.2.1' : '1.2.840.10008.1.2';
+    }
+    if (ts === '1.2.840.10008.1.2.1.99') throw new Error('unsupported:deflate');
+
+    function walk(p, exp, le, top) {
+      while (p + 8 <= n) {
+        const g = dv.getUint16(p, le), e = dv.getUint16(p + 2, le);
+        if (g === 0xfffe) {
+          const len = dv.getUint32(p + 4, le);
+          if (e === 0xe00d || e === 0xe0dd) return p + 8; // item / sequence delimiter
+          if (len === 0xffffffff) p = walk(p + 8, exp, le, false);
+          else p += 8 + len;
+          continue;
+        }
+        let vr = null, len, hdr;
+        if (exp) {
+          vr = String.fromCharCode(u8[p + 4], u8[p + 5]);
+          if (LONG_VR.has(vr)) { len = dv.getUint32(p + 8, le); hdr = 12; } else { len = dv.getUint16(p + 6, le); hdr = 8; }
+        } else { len = dv.getUint32(p + 4, le); hdr = 8; }
+        const key = ((g << 16) >>> 0) + e;
+        const vp = p + hdr;
+        if (len === 0xffffffff) {
+          if (key === 0x7fe00010) { // encapsulated pixel data
+            const frags = [];
+            let q = vp;
+            while (q + 8 <= n) {
+              const ig = dv.getUint16(q, le), ie = dv.getUint16(q + 2, le), il = dv.getUint32(q + 4, le);
+              if (ig !== 0xfffe) break;
+              if (ie === 0xe0dd) { q += 8; break; }
+              frags.push({ off: q + 8, len: Math.min(il, n - q - 8) });
+              q += 8 + il;
+            }
+            if (top) el.set(key, { vr: vr || 'OB', off: vp, len: -1, frags });
+            p = q;
+            continue;
+          }
+          // Undefined-length sequence (UN with undefined length is implicit LE inside)
+          const un = vr === 'UN';
+          p = walk(vp, un ? false : exp, un ? true : le, false);
+          continue;
+        }
+        if (top && !el.has(key)) el.set(key, { vr, off: vp, len: Math.min(len, n - vp) });
+        p = vp + len;
+      }
+      return p;
+    }
+    walk(pos, explicit, little, true);
+    if (el.size < 3) throw new Error('not-dicom');
+    return { buffer, dv, u8, el, ts, little, explicit };
+  }
+
+  function rawStr(u8, e) {
+    let s = '';
+    for (let i = 0; i < e.len; i++) s += String.fromCharCode(u8[e.off + i]);
+    return s.replace(/[\0\s]+$/, '').trim();
+  }
+
+  // Build accessors that decode strings and numbers with the correct charset / VR
+  function accessors(ds) {
+    let decoder = null;
+    const csE = ds.el.get(0x00080005);
+    if (csE) {
+      const parts = rawStr(ds.u8, csE).split('\\').map((s) => s.trim().replace('ISO 2022 ', 'ISO_')).filter(Boolean);
+      const last = parts[parts.length - 1];
+      const label = last && CHARSETS[last];
+      if (label) { try { decoder = new TextDecoder(label); } catch (e) { decoder = null; } }
+    }
+    const utf8 = new TextDecoder('utf-8', { fatal: true });
+    const latin = new TextDecoder('windows-1252');
+    function str(key) {
+      const e = ds.el.get(key);
+      if (!e || e.len <= 0) return '';
+      const bytes = ds.u8.subarray(e.off, e.off + e.len);
+      let s;
+      if (decoder) s = decoder.decode(bytes);
+      else { try { s = utf8.decode(bytes); } catch (_) { s = latin.decode(bytes); } }
+      return s.replace(/\0/g, '').trim();
+    }
+    function nums(key) {
+      const e = ds.el.get(key);
+      if (!e || e.len <= 0) return [];
+      const vr = e.vr || NUM_VR[key] || 'DS';
+      const le = ds.little, dv = ds.dv, out = [];
+      if (vr === 'US') for (let i = 0; i + 2 <= e.len; i += 2) out.push(dv.getUint16(e.off + i, le));
+      else if (vr === 'SS') for (let i = 0; i + 2 <= e.len; i += 2) out.push(dv.getInt16(e.off + i, le));
+      else if (vr === 'UL') for (let i = 0; i + 4 <= e.len; i += 4) out.push(dv.getUint32(e.off + i, le));
+      else if (vr === 'SL') for (let i = 0; i + 4 <= e.len; i += 4) out.push(dv.getInt32(e.off + i, le));
+      else if (vr === 'FL') for (let i = 0; i + 4 <= e.len; i += 4) out.push(dv.getFloat32(e.off + i, le));
+      else if (vr === 'FD') for (let i = 0; i + 8 <= e.len; i += 8) out.push(dv.getFloat64(e.off + i, le));
+      else rawStr(ds.u8, e).split('\\').forEach((s) => { const v = parseFloat(s); if (!isNaN(v)) out.push(v); });
+      return out;
+    }
+    const num = (key, def) => { const a = nums(key); return a.length ? a[0] : def; };
+    return { str, nums, num };
+  }
+
+  const TS_NAMES = {
+    '1.2.840.10008.1.2': 'Implicit VR LE', '1.2.840.10008.1.2.1': 'Explicit VR LE',
+    '1.2.840.10008.1.2.2': 'Explicit VR BE', '1.2.840.10008.1.2.5': 'RLE Lossless',
+    '1.2.840.10008.1.2.4.50': 'JPEG Baseline', '1.2.840.10008.1.2.4.51': 'JPEG Extended',
+    '1.2.840.10008.1.2.4.57': 'JPEG Lossless', '1.2.840.10008.1.2.4.70': 'JPEG Lossless SV1',
+    '1.2.840.10008.1.2.4.80': 'JPEG-LS Lossless', '1.2.840.10008.1.2.4.81': 'JPEG-LS Near-lossless',
+    '1.2.840.10008.1.2.4.90': 'JPEG 2000 Lossless', '1.2.840.10008.1.2.4.91': 'JPEG 2000',
+    '1.2.840.10008.1.2.1.99': 'Deflated'
+  };
+
+  // Normalise raw samples: mask to BitsStored and sign-extend when signed
+  function normalise(src, bitsAlloc, bitsStored, signed) {
+    const n = src.length;
+    if (bitsAlloc === 8) {
+      if (!signed) return src instanceof Uint8Array ? src : Uint8Array.from(src);
+      const out = new Int8Array(n); for (let i = 0; i < n; i++) out[i] = src[i]; return out;
+    }
+    const shift = 32 - bitsStored;
+    if (bitsAlloc === 16) {
+      if (signed) {
+        const out = new Int16Array(n);
+        for (let i = 0; i < n; i++) out[i] = (src[i] << shift) >> shift;
+        return out;
+      }
+      const mask = bitsStored >= 16 ? 0xffff : (1 << bitsStored) - 1;
+      const out = new Uint16Array(n);
+      for (let i = 0; i < n; i++) out[i] = src[i] & mask;
+      return out;
+    }
+    if (signed) return Int32Array.from(src);
+    return Uint32Array.from(src);
+  }
+
+  function readUncompressed(ds, off, count, bitsAlloc) {
+    const le = ds.little, dv = ds.dv;
+    if (bitsAlloc === 8) return ds.u8.slice(off, off + count);
+    if (bitsAlloc === 16) {
+      const out = new Uint16Array(count);
+      for (let i = 0; i < count; i++) out[i] = dv.getUint16(off + i * 2, le);
+      return out;
+    }
+    const out = new Uint32Array(count);
+    for (let i = 0; i < count; i++) out[i] = dv.getUint32(off + i * 4, le);
+    return out;
+  }
+
+  // Group encapsulated fragments into frames
+  function groupFragments(ds, frags, frames) {
+    const data = frags.slice(1).filter((f) => f.len > 0);
+    if (!data.length) return [];
+    if (frames <= 1) return [data];
+    if (data.length === frames) return data.map((f) => [f]);
+    // Use SOI markers (JPEG family) to find frame starts
+    const groups = [];
+    data.forEach((f) => {
+      const soi = ds.u8[f.off] === 0xff && ds.u8[f.off + 1] === 0xd8;
+      if (soi || !groups.length) groups.push([f]); else groups[groups.length - 1].push(f);
+    });
+    return groups;
+  }
+  function concat(ds, group) {
+    if (group.length === 1) return ds.u8.slice(group[0].off, group[0].off + group[0].len);
+    const total = group.reduce((s, f) => s + f.len, 0);
+    const out = new Uint8Array(total);
+    let p = 0;
+    group.forEach((f) => { out.set(ds.u8.subarray(f.off, f.off + f.len), p); p += f.len; });
+    return out;
+  }
+
+  // DICOM RLE Lossless (PS3.5 Annex G)
+  function decodeRLE(bytes, rows, cols, samples, bitsAlloc) {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const nSeg = dv.getUint32(0, true);
+    const offs = [];
+    for (let i = 0; i < nSeg; i++) offs.push(dv.getUint32(4 + i * 4, true));
+    const px = rows * cols, bps = bitsAlloc / 8;
+    const out = new Uint8Array(px * samples * bps);
+    for (let s = 0; s < nSeg; s++) {
+      const sample = Math.floor(s / bps);
+      const byteIdx = bps - 1 - (s % bps); // segments are MSB first; output little endian
+      let p = offs[s];
+      const end = s + 1 < nSeg ? offs[s + 1] : bytes.length;
+      let o = 0;
+      const put = (v) => { if (o < px) { out[(o * samples + sample) * bps + byteIdx] = v; o++; } };
+      while (p < end && o < px) {
+        const c = (bytes[p++] << 24) >> 24;
+        if (c >= 0) { for (let k = 0; k <= c && p < end; k++) put(bytes[p++]); }
+        else if (c !== -128) { const v = bytes[p++]; for (let k = 0; k < 1 - c; k++) put(v); }
+      }
+    }
+    if (bitsAlloc === 8) return out;
+    if (bitsAlloc === 16) return new Uint16Array(out.buffer);
+    return new Uint32Array(out.buffer);
+  }
+
+  async function decodeBrowserJpeg(bytes, rows, cols, samples) {
+    if (typeof createImageBitmap === 'undefined') throw new Error('unsupported:jpeg');
+    const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
+    const c = document.createElement('canvas');
+    c.width = cols; c.height = rows;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(bmp, 0, 0);
+    const rgba = ctx.getImageData(0, 0, cols, rows).data;
+    const px = rows * cols;
+    const out = new Uint8Array(px * samples);
+    for (let i = 0; i < px; i++) {
+      if (samples === 1) out[i] = rgba[i * 4];
+      else { out[i * 3] = rgba[i * 4]; out[i * 3 + 1] = rgba[i * 4 + 1]; out[i * 3 + 2] = rgba[i * 4 + 2]; }
+    }
+    return out;
+  }
+
+  // Main entry: buffer -> list of image objects (one per frame)
+  async function load(buffer, fileName) {
+    const ds = parse(buffer);
+    const a = accessors(ds);
+    const pixEl = ds.el.get(0x7fe00010);
+    if (!pixEl) throw new Error('no-pixels');
+    const rows = a.num(0x00280010, 0), cols = a.num(0x00280011, 0);
+    if (!rows || !cols) throw new Error('no-pixels');
+    const samples = a.num(0x00280002, 1);
+    const bitsAlloc = a.num(0x00280100, 16);
+    const bitsStored = a.num(0x00280101, bitsAlloc);
+    const signed = a.num(0x00280103, 0) === 1;
+    const planar = a.num(0x00280006, 0);
+    const frames = Math.max(1, Math.round(a.num(0x00280008, 1)));
+    const photometric = a.str(0x00280004) || (samples === 3 ? 'RGB' : 'MONOCHROME2');
+    if (photometric === 'PALETTE COLOR') throw new Error('unsupported:palette');
+    if (bitsAlloc === 1) throw new Error('unsupported:1bit');
+    if (![8, 16, 32].includes(bitsAlloc)) throw new Error('unsupported:bits');
+
+    const ts = ds.ts;
+    const px = rows * cols;
+    const raw = [];
+    if (pixEl.len >= 0) {
+      if (ts !== '1.2.840.10008.1.2' && ts !== '1.2.840.10008.1.2.1' && ts !== '1.2.840.10008.1.2.2') {
+        // Some writers store native pixels despite a compressed TS; try anyway
+      }
+      const frameBytes = px * samples * (bitsAlloc / 8);
+      const avail = Math.floor(pixEl.len / frameBytes);
+      if (avail < 1) throw new Error('bad-pixels');
+      for (let f = 0; f < Math.min(frames, avail); f++) {
+        raw.push(readUncompressed(ds, pixEl.off + f * frameBytes, px * samples, bitsAlloc));
+      }
+    } else {
+      const groups = groupFragments(ds, pixEl.frags, frames);
+      if (ts === '1.2.840.10008.1.2.5') {
+        for (const g of groups.length === frames ? groups : pixEl.frags.slice(1).map((f) => [f])) {
+          raw.push(decodeRLE(concat(ds, g), rows, cols, samples, bitsAlloc));
+        }
+      } else if (ts === '1.2.840.10008.1.2.4.57' || ts === '1.2.840.10008.1.2.4.70') {
+        const JL = (typeof window !== 'undefined' && window.JPEGLossless) || (typeof globalThis !== 'undefined' && globalThis.JPEGLossless);
+        if (!JL) throw new Error('unsupported:jpegll');
+        for (const g of groups) {
+          const bytes = concat(ds, g);
+          const dec = new JL.Decoder();
+          const outBuf = dec.decompress(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+          const bytesPer = outBuf.byteLength / (px * samples);
+          if (bytesPer <= 1) raw.push(new Uint8Array(outBuf).slice(0, px * samples));
+          else raw.push(new Uint16Array(outBuf).slice(0, px * samples));
+        }
+      } else if (ts === '1.2.840.10008.1.2.4.50' || (ts === '1.2.840.10008.1.2.4.51' && bitsStored <= 8)) {
+        for (const g of groups) raw.push(await decodeBrowserJpeg(concat(ds, g), rows, cols, samples));
+      } else {
+        throw new Error('unsupported:' + (TS_NAMES[ts] || ts));
+      }
+    }
+    if (!raw.length) throw new Error('bad-pixels');
+
+    const effAlloc = raw[0] instanceof Uint8Array ? 8 : bitsAlloc;
+    const isColor = samples === 3;
+    const pixels = raw.map((r) => {
+      if (isColor) {
+        let rgb = r instanceof Uint8Array ? r : Uint8Array.from(r, (v) => v >> Math.max(0, bitsStored - 8));
+        if (planar === 1 && pixEl.len >= 0) { // RRR..GGG..BBB -> RGBRGB
+          const t = new Uint8Array(px * 3);
+          for (let i = 0; i < px; i++) { t[i * 3] = rgb[i]; t[i * 3 + 1] = rgb[px + i]; t[i * 3 + 2] = rgb[2 * px + i]; }
+          rgb = t;
+        }
+        const browserJpeg = ts === '1.2.840.10008.1.2.4.50' || ts === '1.2.840.10008.1.2.4.51';
+        if (photometric === 'YBR_FULL' && !browserJpeg) {
+          const cl = (v) => (v < 0 ? 0 : v > 255 ? 255 : v);
+          for (let i = 0; i < px; i++) {
+            const y = rgb[i * 3], cb = rgb[i * 3 + 1] - 128, cr = rgb[i * 3 + 2] - 128;
+            rgb[i * 3] = cl(y + 1.402 * cr); rgb[i * 3 + 1] = cl(y - 0.344136 * cb - 0.714136 * cr); rgb[i * 3 + 2] = cl(y + 1.772 * cb);
+          }
+        }
+        return rgb;
+      }
+      return normalise(r, effAlloc, Math.min(bitsStored, effAlloc), signed);
+    });
+
+    const spacing = a.nums(0x00280030);
+    const imagerSpacing = a.nums(0x00181164);
+    const wcs = a.nums(0x00281050), wws = a.nums(0x00281051);
+    const pos = a.nums(0x00200032), ori = a.nums(0x00200037);
+    const meta = {
+      fileName,
+      patientName: a.str(0x00100010).replace(/\^+/g, ' ').trim(),
+      patientId: a.str(0x00100020),
+      birthDate: a.str(0x00100030),
+      sex: a.str(0x00100040),
+      studyDate: a.str(0x00080020),
+      studyDesc: a.str(0x00081030),
+      seriesDesc: a.str(0x0008103e),
+      seriesNumber: a.str(0x00200011),
+      seriesUID: a.str(0x0020000e) || ('file:' + fileName),
+      modality: a.str(0x00080060),
+      bodyPart: a.str(0x00180015),
+      institution: a.str(0x00080080),
+      manufacturer: [a.str(0x00080070), a.str(0x00081090)].filter(Boolean).join(' '),
+      sliceThickness: a.num(0x00180050, null),
+      kvp: a.str(0x00180060),
+      tr: a.str(0x00180080), te: a.str(0x00180081),
+      transferSyntax: TS_NAMES[ts] || ts
+    };
+    const base = {
+      meta, rows, cols, isColor, photometric,
+      slope: a.num(0x00281053, 1) || 1, intercept: a.num(0x00281052, 0),
+      wc: wcs.length ? wcs[0] : null, ww: wws.length ? wws[0] : null,
+      rowSpacing: spacing[0] || imagerSpacing[0] || null,
+      colSpacing: spacing[1] || imagerSpacing[1] || null,
+      spacingSource: spacing.length ? 'patient' : imagerSpacing.length ? 'detector' : null,
+      instance: a.num(0x00200013, null),
+      sliceLocation: a.num(0x00201041, null),
+      position: pos.length === 3 ? pos : null,
+      orientation: ori.length === 6 ? ori : null
+    };
+    return pixels.map((p, i) => Object.assign({}, base, { pixels: p, frame: i, frameCount: pixels.length }));
+  }
+
+  // Pixel value range (modality units) for automatic windowing
+  function range(img) {
+    if (img._range) return img._range;
+    const p = img.pixels;
+    let mn = Infinity, mx = -Infinity;
+    const step = p.length > 1e6 ? 4 : 1;
+    for (let i = 0; i < p.length; i += step) { const v = p[i]; if (v < mn) mn = v; if (v > mx) mx = v; }
+    const a = mn * img.slope + img.intercept, b = mx * img.slope + img.intercept;
+    img._range = [Math.min(a, b), Math.max(a, b)];
+    return img._range;
+  }
+
+  return { load, range, parse };
+})();
+
+
+</script>
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const viewport = $('#viewport'), panesEl = $('#panes'), empty = $('#empty');
+  const COLORS = ['#5fb3ff', '#6fdc8c', '#ffa35c'];
+  const CURSOR = '#ff6ad5';
+  const CLS_NAME = { ax: 'Аксиальная', cor: 'Корональная', sag: 'Сагиттальная' };
+
+  // ---------- vector helpers ----------
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+  const mul = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const norm = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return mul(a, 1 / l); };
+
+  const S = {
+    series: [], panes: [], active: 0, layout: 1, tool: 'scroll', invert: false, hidePHI: false,
+    link: true, cursor: null, draft: null, pending: null
+  };
+  const activePane = () => S.panes[S.active];
+  const visiblePanes = () => S.panes.slice(0, S.layout);
+  const aspect = (im) => (im && im.rowSpacing && im.colSpacing ? im.rowSpacing / im.colSpacing : 1);
+
+  // ---------- helpers ----------
+  const fmtDate = (d) => (/^\d{8}$/.test(d) ? `${d.slice(6, 8)}.${d.slice(4, 6)}.${d.slice(0, 4)}` : d || '');
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const round = (v, d = 0) => { const k = Math.pow(10, d); return Math.round(v * k) / k; };
+  let hintTimer = null;
+  function hint(text, ms = 2600) {
+    const h = $('#hint');
+    clearTimeout(hintTimer);
+    if (!text) { h.classList.remove('show'); return; }
+    h.textContent = text; h.classList.add('show');
+    if (ms) hintTimer = setTimeout(() => h.classList.remove('show'), ms);
+  }
+
+  // ---------- geometry ----------
+  function geom(im) {
+    if (!im) return null;
+    if (im._g !== undefined) return im._g;
+    im._g = null;
+    if (im.position && im.orientation && im.rowSpacing && im.colSpacing && im.spacingSource === 'patient') {
+      const o = im.orientation;
+      const X = norm([o[0], o[1], o[2]]), Y = norm([o[3], o[4], o[5]]);
+      im._g = { O: im.position, X, Y, N: norm(cross(X, Y)), dx: im.colSpacing, dy: im.rowSpacing };
+    }
+    return im._g;
+  }
+  // image coordinates are continuous: pixel i covers [i, i+1), its centre is i + 0.5
+  const toPatient = (g, x, y) => add(add(g.O, mul(g.X, (x - 0.5) * g.dx)), mul(g.Y, (y - 0.5) * g.dy));
+  const fromPatient = (g, P) => { const d = sub(P, g.O); return { x: dot(d, g.X) / g.dx + 0.5, y: dot(d, g.Y) / g.dy + 0.5, d: dot(d, g.N) }; };
+  function planeClass(n) {
+    const a = n.map(Math.abs), m = Math.max(a[0], a[1], a[2]);
+    return a[2] === m ? 'ax' : a[1] === m ? 'cor' : 'sag';
+  }
+  function dirLetters(v) {
+    const L = [['L', 'R'], ['P', 'A'], ['S', 'I']];
+    const a = v.map(Math.abs);
+    return [0, 1, 2].sort((i, j) => a[j] - a[i]).filter((i) => a[i] > 0.3).slice(0, 2).map((i) => (v[i] > 0 ? L[i][0] : L[i][1])).join('');
+  }
+  function spacingOf(s) {
+    if (s._spacing != null) return s._spacing;
+    const ims = s.images, g0 = geom(ims[0]);
+    let sp = null;
+    if (g0 && ims.length > 1) {
+      const d = [];
+      for (let i = 1; i < ims.length; i++) if (ims[i].position && ims[i - 1].position) d.push(Math.abs(dot(sub(ims[i].position, ims[i - 1].position), g0.N)));
+      const nz = d.filter((x) => x > 0.01).sort((a, b) => a - b);
+      if (nz.length) sp = nz[Math.floor(nz.length / 2)];
+    }
+    s._spacing = sp || ims[0].meta.sliceThickness || 3;
+    return s._spacing;
+  }
+  const tol = (s) => spacingOf(s) * 0.6 + 0.5;
+  function nearest(s, P) {
+    let best = null;
+    s.images.forEach((im, i) => {
+      const g = geom(im);
+      if (!g) return;
+      const d = Math.abs(dot(sub(P, g.O), g.N));
+      if (!best || d < best.d) best = { i, d };
+    });
+    return best;
+  }
+
+  // ---------- volumes and reconstructions (MPR) ----------
+  function volumeInfo(s) {
+    if (s._vol !== undefined) return s._vol;
+    s._vol = null;
+    const ims = s.images;
+    if (s.mpr || ims.length < 20) return null;
+    const i0 = ims[0], g0 = geom(i0);
+    if (!g0) return null;
+    for (const im of ims) {
+      const g = geom(im);
+      if (!g || im.isColor || im.rows !== i0.rows || im.cols !== i0.cols || Math.abs(dot(g.N, g0.N)) < 0.999) return null;
+    }
+    const z = ims.map((im) => dot(im.position, g0.N));
+    const diffs = [];
+    for (let i = 1; i < z.length; i++) diffs.push(z[i] - z[i - 1]);
+    const sorted = diffs.slice().sort((a, b) => a - b), dz = sorted[Math.floor(sorted.length / 2)];
+    if (!(dz > 0.05) || dz > 3.5 || diffs.some((d) => Math.abs(d - dz) > dz * 0.2 + 0.01)) return null;
+    const along = norm(sub(ims[ims.length - 1].position, i0.position));
+    if (dot(along, g0.N) < 0.995) return null; // gantry tilt or irregular stack
+    const sameScale = ims.every((im) => im.slope === i0.slope && im.intercept === i0.intercept && im.pixels.constructor === i0.pixels.constructor);
+    s._vol = { O: i0.position, X: g0.X, Y: g0.Y, N: g0.N, dx: g0.dx, dy: g0.dy, dz, C: i0.cols, R: i0.rows, K: ims.length, sameScale };
+    return s._vol;
+  }
+  const mprCache = [];
+  function buildMPR(src, sAxis) {
+    const v = volumeInfo(src);
+    if (!v) return null;
+    const AX = {
+      c: { name: 'c', vec: v.X, n: v.C, sp: v.dx },
+      r: { name: 'r', vec: v.Y, n: v.R, sp: v.dy },
+      k: { name: 'k', vec: v.N, n: v.K, sp: v.dz }
+    };
+    const [a, b] = sAxis === 'r' ? [AX.c, AX.k] : [AX.r, AX.k];
+    const cls = planeClass(cross(a.vec, b.vec));
+    const T = { ax: [[1, 0, 0], [0, 1, 0]], cor: [[1, 0, 0], [0, 0, -1]], sag: [[0, 1, 0], [0, 0, -1]] }[cls];
+    const s1 = Math.abs(dot(a.vec, T[0])) + Math.abs(dot(b.vec, T[1])), s2 = Math.abs(dot(b.vec, T[0])) + Math.abs(dot(a.vec, T[1]));
+    const [rt, dn] = s1 >= s2 ? [a, b] : [b, a];
+    const rRev = dot(rt.vec, T[0]) < 0, dRev = dot(dn.vec, T[1]) < 0;
+    const sl = AX[sAxis];
+    const unit = { c: [0, 1], r: [0, v.C], k: [1, 0] };
+    const src0 = src.images[0];
+    const Ctor = v.sameScale ? src0.pixels.constructor : Float32Array;
+    const cols = rt.n, rows = dn.n;
+    const vox = (c, r, k) => add(add(add(v.O, mul(v.X, c * v.dx)), mul(v.Y, r * v.dy)), mul(v.N, k * v.dz));
+    const rowDir = rRev ? mul(rt.vec, -1) : rt.vec, colDir = dRev ? mul(dn.vec, -1) : dn.vec;
+    const label = `${CLS_NAME[cls]} реконструкция`;
+    const short = { ax: 'Аксиальная МПР', cor: 'Корональная МПР', sag: 'Сагиттальная МПР' }[cls];
+    const series = {
+      uid: src.uid + '#mpr-' + sAxis, mpr: { src, axis: sAxis }, cls, label, short, number: src.number,
+      images: [], wl: null, _spacing: sl.sp, _vol: null
+    };
+    const meta = Object.assign({}, src0.meta, { seriesDesc: label, sliceThickness: round(sl.sp, 2), transferSyntax: `МПР из серии «${src.label}»` });
+    let vr = null;
+    const getRange = () => {
+      if (!vr) {
+        let mn = Infinity, mx = -Infinity;
+        const step = Math.max(1, Math.floor(src.images.length / 40));
+        for (let k = 0; k < src.images.length; k += step) { const r = DicomCore.range(src.images[k]); if (r[0] < mn) mn = r[0]; if (r[1] > mx) mx = r[1]; }
+        vr = [mn, mx];
+      }
+      return vr;
+    };
+    function gather(f) {
+      const ru = unit[rt.name], du = unit[dn.name];
+      const rb = rRev ? rt.n - 1 : 0, rs = rRev ? -1 : 1, db = dRev ? dn.n - 1 : 0, ds = dRev ? -1 : 1;
+      const kB = unit[sAxis][0] * f + ru[0] * rb + du[0] * db, oB = unit[sAxis][1] * f + ru[1] * rb + du[1] * db;
+      const ki = ru[0] * rs, oi = ru[1] * rs, kj = du[0] * ds, oj = du[1] * ds;
+      const out = new Ctor(rows * cols);
+      const px = src.images.map((im) => im.pixels);
+      for (let j = 0; j < rows; j++) {
+        let k = kB + kj * j, o = oB + oj * j;
+        const row = j * cols;
+        if (v.sameScale) for (let i = 0; i < cols; i++) { out[row + i] = px[k][o]; k += ki; o += oi; }
+        else for (let i = 0; i < cols; i++) { const im = src.images[k]; out[row + i] = px[k][o] * im.slope + im.intercept; k += ki; o += oi; }
+      }
+      return out;
+    }
+    for (let f = 0; f < sl.n; f++) {
+      const idx = { [sAxis]: f, [rt.name]: rRev ? rt.n - 1 : 0, [dn.name]: dRev ? dn.n - 1 : 0 };
+      const im = {
+        meta, rows, cols, isColor: false, photometric: src0.photometric,
+        slope: v.sameScale ? src0.slope : 1, intercept: v.sameScale ? src0.intercept : 0,
+        wc: src0.wc, ww: src0.ww, rowSpacing: dn.sp, colSpacing: rt.sp, spacingSource: 'patient',
+        instance: f + 1, sliceLocation: null, position: vox(idx.c, idx.r, idx.k), orientation: [...rowDir, ...colDir],
+        frame: 0, frameCount: 1, _px: null
+      };
+      Object.defineProperty(im, 'pixels', {
+        get() {
+          if (!this._px) { this._px = gather(f); mprCache.push(this); if (mprCache.length > 48) mprCache.shift()._px = null; }
+          return this._px;
+        }
+      });
+      Object.defineProperty(im, '_range', { get: getRange, set() {} });
+      series.images.push(im);
+    }
+    return series;
+  }
+
+  // ---------- window / level ----------
+  const wlOwner = (s) => (s.mpr ? s.mpr.src : s);
+  function autoWL(im) { const [a, b] = DicomCore.range(im); return { wc: (a + b) / 2, ww: Math.max(b - a, 1) }; }
+  function defaultWL(im) { return im.wc != null && im.ww != null && im.ww > 1 ? { wc: im.wc, ww: im.ww } : autoWL(im); }
+  const getWL = (s, im) => wlOwner(s).wl || defaultWL(im);
+
+  // ---------- panes ----------
+  function makePane(i) {
+    const el = document.createElement('div');
+    el.className = 'pane';
+    el.style.setProperty('--pc', COLORS[i]);
+    el.innerHTML = '<canvas></canvas><div class="ov tl"></div><div class="ov tr"></div><div class="ov bl"></div><div class="ov br"></div>' +
+      '<div class="ov dl"></div><div class="ov dt"></div><div class="ov dr"></div><div class="ov db"></div><div class="pempty hidden">Выберите серию в списке сверху</div>';
+    panesEl.append(el);
+    const q = (s) => el.querySelector(s);
+    const p = {
+      i, el, canvas: q('canvas'), off: document.createElement('canvas'), offData: null,
+      series: null, idx: 0, view: null, userView: false, dirty: true, raf: 0,
+      ov: { tl: q('.tl'), tr: q('.tr'), bl: q('.bl'), br: q('.br'), l: q('.dl'), t: q('.dt'), r: q('.dr'), b: q('.db') }, pempty: q('.pempty')
+    };
+    p.ctx = p.canvas.getContext('2d');
+    p.offCtx = p.off.getContext('2d');
+    p.img = () => (p.series ? p.series.images[p.idx] : null);
+    bindInput(p);
+    new ResizeObserver(() => { if (!p.userView) p.view = null; redraw(p); }).observe(el);
+    return p;
+  }
+
+  function paint(s, im, data, invert) {
+    const d = data.data, px = im.pixels, n = im.rows * im.cols;
+    if (im.isColor) {
+      for (let i = 0, j = 0; i < n; i++, j += 4) {
+        const r = px[i * 3], g = px[i * 3 + 1], b = px[i * 3 + 2];
+        d[j] = invert ? 255 - r : r; d[j + 1] = invert ? 255 - g : g; d[j + 2] = invert ? 255 - b : b; d[j + 3] = 255;
+      }
+      return;
+    }
+    const wl = getWL(s, im);
+    const lo = wl.wc - wl.ww / 2, k = 255 / Math.max(wl.ww, 1e-6), sl = im.slope, ic = im.intercept;
+    const inv = im.photometric === 'MONOCHROME1' ? !invert : invert;
+    for (let i = 0, j = 0; i < n; i++, j += 4) {
+      let g = (px[i] * sl + ic - lo) * k;
+      g = g < 0 ? 0 : g > 255 ? 255 : g;
+      if (inv) g = 255 - g;
+      d[j] = d[j + 1] = d[j + 2] = g; d[j + 3] = 255;
+    }
+  }
+  function renderImage(p) {
+    const im = p.img();
+    if (p.off.width !== im.cols || p.off.height !== im.rows || !p.offData) {
+      p.off.width = im.cols; p.off.height = im.rows;
+      p.offData = p.offCtx.createImageData(im.cols, im.rows);
+    }
+    paint(p.series, im, p.offData, S.invert);
+    p.offCtx.putImageData(p.offData, 0, 0);
+  }
+  function redraw(p, imageChanged) {
+    if (imageChanged) p.dirty = true;
+    if (!p.raf) p.raf = requestAnimationFrame(() => draw(p));
+  }
+  function redrawAll(imageChanged) { visiblePanes().forEach((p) => redraw(p, imageChanged)); }
+  function redrawSeries(s) { visiblePanes().forEach((p) => { if (p.series && wlOwner(p.series) === wlOwner(s)) redraw(p, true); }); }
+
+  function draw(p) {
+    p.raf = 0;
+    const dpr = window.devicePixelRatio || 1;
+    const W = p.el.clientWidth, H = p.el.clientHeight;
+    if (!W || !H) return;
+    if (p.canvas.width !== Math.round(W * dpr) || p.canvas.height !== Math.round(H * dpr)) {
+      p.canvas.width = Math.round(W * dpr); p.canvas.height = Math.round(H * dpr);
+    }
+    const ctx = p.ctx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, p.canvas.width, p.canvas.height);
+    const im = p.img();
+    p.pempty.classList.toggle('hidden', !!im || !S.series.length);
+    if (!im) { Object.values(p.ov).forEach((o) => { o.innerHTML = ''; }); return; }
+    if (!p.view) fit(p);
+    if (p.dirty) { renderImage(p); p.dirty = false; }
+    const v = p.view, asp = aspect(im);
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+    ctx.setTransform(dpr * v.scale, 0, 0, dpr * v.scale * asp, dpr * v.tx, dpr * v.ty);
+    ctx.drawImage(p.off, 0, 0);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawRefLines(p, im);
+    drawCursor(p, im);
+    drawMarks(p, im);
+    updateOverlay(p, im);
+  }
+  function fit(p) {
+    const im = p.img();
+    if (!im) return;
+    const W = p.el.clientWidth, H = p.el.clientHeight, asp = aspect(im);
+    const s = Math.min(W / im.cols, H / (im.rows * asp)) * 0.94;
+    p.view = { scale: s, tx: (W - im.cols * s) / 2, ty: (H - im.rows * asp * s) / 2 };
+    p.userView = false;
+  }
+  const toImg = (p, x, y) => { const v = p.view, a = aspect(p.img()); return { x: (x - v.tx) / v.scale, y: (y - v.ty) / (v.scale * a) }; };
+  const toScr = (p, pt) => { const v = p.view, a = aspect(p.img()); return { x: v.tx + pt.x * v.scale, y: v.ty + pt.y * v.scale * a }; };
+
+  // ---------- drawing primitives ----------
+  function line(ctx, a, b, color, width = 1.6, dashed = false) {
+    ctx.setLineDash(dashed ? [5, 4] : []);
+    ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.lineWidth = width + 2;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.strokeStyle = color; ctx.lineWidth = width;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  function dot2(ctx, pt) {
+    ctx.fillStyle = '#ffd24a'; ctx.strokeStyle = 'rgba(0,0,0,.7)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, 3.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+  function label(p, text, pt) {
+    const ctx = p.ctx;
+    ctx.font = '600 13px "IBM Plex Sans", system-ui, sans-serif';
+    const w = ctx.measureText(text).width;
+    const x = Math.min(Math.max(pt.x + 8, 4), p.el.clientWidth - w - 10), y = Math.max(pt.y - 8, 18);
+    ctx.fillStyle = 'rgba(0,0,0,.62)';
+    ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x - 5, y - 14, w + 10, 20, 5); else ctx.rect(x - 5, y - 14, w + 10, 20); ctx.fill();
+    ctx.fillStyle = '#ffd24a'; ctx.fillText(text, x, y);
+  }
+
+  // Intersection of another pane's slice plane with this image, drawn in that pane's colour
+  function drawRefLines(p, im) {
+    const ga = geom(im);
+    if (!ga) return;
+    const corners = [[0, 0], [im.cols, 0], [im.cols, im.rows], [0, im.rows]];
+    const cp = corners.map(([x, y]) => toPatient(ga, x, y));
+    visiblePanes().forEach((q) => {
+      if (q === p) return;
+      const gb = geom(q.img());
+      if (!gb || Math.abs(dot(ga.N, gb.N)) > 0.985) return;
+      const d = cp.map((P) => dot(sub(P, gb.O), gb.N));
+      const pts = [];
+      for (let e = 0; e < 4; e++) {
+        const a = e, b = (e + 1) % 4;
+        if (d[a] === 0) pts.push({ x: corners[a][0], y: corners[a][1] });
+        else if (d[a] * d[b] < 0) {
+          const t = d[a] / (d[a] - d[b]);
+          pts.push({ x: corners[a][0] + t * (corners[b][0] - corners[a][0]), y: corners[a][1] + t * (corners[b][1] - corners[a][1]) });
+        }
+      }
+      if (pts.length < 2) return;
+      p.ctx.globalAlpha = 0.9;
+      line(p.ctx, toScr(p, pts[0]), toScr(p, pts[1]), COLORS[q.i], 1.3);
+      p.ctx.globalAlpha = 1;
+    });
+  }
+  function drawCursor(p, im) {
+    if (!S.cursor) return;
+    const g = geom(im);
+    if (!g) return;
+    const f = fromPatient(g, S.cursor);
+    if (Math.abs(f.d) > tol(p.series) || f.x < 0 || f.y < 0 || f.x > im.cols || f.y > im.rows) return;
+    const c = toScr(p, f), ctx = p.ctx;
+    [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => line(ctx, { x: c.x + dx * 5, y: c.y + dy * 5 }, { x: c.x + dx * 15, y: c.y + dy * 15 }, CURSOR, 1.8));
+  }
+
+  // ---------- measurements ----------
+  function lengthLabel(im, a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    if (im.colSpacing && im.rowSpacing) {
+      const mm = Math.hypot(dx * im.colSpacing, dy * im.rowSpacing);
+      const txt = mm >= 100 ? `${round(mm / 10, 1)} см` : `${round(mm, 1)} мм`;
+      return (im.spacingSource === 'detector' ? '≈ ' : '') + txt;
+    }
+    return `${round(Math.hypot(dx, dy))} пикс.`;
+  }
+  function angleDeg(im, a1, b1, a2, b2) {
+    const sx = im.colSpacing || 1, sy = im.rowSpacing || 1;
+    const v1 = [(b1.x - a1.x) * sx, (b1.y - a1.y) * sy], v2 = [(b2.x - a2.x) * sx, (b2.y - a2.y) * sy];
+    const c = Math.abs(v1[0] * v2[0] + v1[1] * v2[1]) / (Math.hypot(...v1) * Math.hypot(...v2) || 1);
+    return Math.acos(Math.min(1, c)) * 180 / Math.PI;
+  }
+  function drawMark(p, im, m) {
+    const P = m.pts.map((pt) => toScr(p, pt)), ctx = p.ctx, Y = '#ffd24a';
+    line(ctx, P[0], P[1], Y); dot2(ctx, P[0]); dot2(ctx, P[1]);
+    if (m.type === 'ruler') label(p, lengthLabel(im, m.pts[0], m.pts[1]), P[1]);
+    else if (P.length >= 4) {
+      line(ctx, P[2], P[3], Y); dot2(ctx, P[2]); dot2(ctx, P[3]);
+      const m1 = { x: (P[0].x + P[1].x) / 2, y: (P[0].y + P[1].y) / 2 }, m2 = { x: (P[2].x + P[3].x) / 2, y: (P[2].y + P[3].y) / 2 };
+      line(ctx, m1, m2, 'rgba(255,210,74,.75)', 1.6, true);
+      label(p, `${round(angleDeg(im, ...m.pts), 1)}°`, { x: (m1.x + m2.x) / 2, y: (m1.y + m2.y) / 2 });
+    }
+  }
+  function drawMarks(p, im) {
+    (im.marks || []).forEach((m) => drawMark(p, im, m));
+    if (S.pending && S.pending.im === im && !(S.draft && S.draft.pane === p)) drawMark(p, im, S.pending.mark);
+    if (S.draft && S.draft.pane === p) drawMark(p, im, S.draft.mark);
+  }
+
+  // ---------- overlays ----------
+  function updateOverlay(p, im) {
+    const m = im.meta, n = p.series.images.length, multi = S.layout > 1, o = p.ov;
+    const tl = [];
+    if (!multi || p.i === 0) {
+      if (S.hidePHI) tl.push('Данные пациента скрыты');
+      else { if (m.patientName) tl.push(esc(m.patientName)); if (m.patientId && !multi) tl.push('ID ' + esc(m.patientId)); }
+      if (m.studyDate) tl.push(fmtDate(m.studyDate));
+    }
+    o.tl.innerHTML = tl.join('<br>');
+    const tr = [];
+    if (!multi) tr.push(esc([m.modality, m.bodyPart].filter(Boolean).join(', ')));
+    tr.push((multi ? '<span class="pdot"></span>' : '') + esc(multi && p.series.short ? p.series.short : p.series.label));
+    if (!multi && !S.hidePHI && m.institution) tr.push(esc(m.institution));
+    o.tr.innerHTML = tr.filter(Boolean).join('<br>');
+    const bl = [`Срез ${p.idx + 1} / ${n}`];
+    if (!multi && im.sliceLocation != null) bl.push(`Позиция ${round(im.sliceLocation, 1)} мм`);
+    if (!multi && m.sliceThickness) bl.push(`Толщина ${round(m.sliceThickness, 2)} мм`);
+    o.bl.innerHTML = bl.join('<br>');
+    const br = [];
+    if (!im.isColor) { const wl = getWL(p.series, im); br.push(`W ${round(wl.ww)} L ${round(wl.wc)}`); }
+    if (!multi) br.push(`Масштаб ${round(p.view.scale * 100)}%`);
+    o.br.innerHTML = br.join('<br>');
+    const g = geom(im);
+    o.l.textContent = g ? dirLetters(mul(g.X, -1)) : ''; o.r.textContent = g ? dirLetters(g.X) : '';
+    o.t.textContent = g ? dirLetters(mul(g.Y, -1)) : ''; o.b.textContent = g ? dirLetters(g.Y) : '';
+    if (p === activePane()) updateNav();
+  }
+  function updateNav() {
+    const p = activePane(), n = p.series ? p.series.images.length : 0;
+    $('#nav').classList.toggle('hidden', n < 2);
+    if (!n) return;
+    $('#pos').textContent = `${p.idx + 1} / ${n}`;
+    const sl = $('#slider');
+    if (+sl.max !== n - 1) sl.max = n - 1;
+    if (+sl.value !== p.idx) sl.value = p.idx;
+  }
+
+  // ---------- navigation & linking ----------
+  function setIdx(p, i, user) {
+    if (!p.series) return;
+    const n = p.series.images.length;
+    i = Math.max(0, Math.min(n - 1, i));
+    if (i === p.idx) return;
+    const prev = p.img();
+    p.idx = i;
+    if (S.draft && S.draft.pane === p) S.draft = null;
+    if (S.pending && S.pending.pane === p) S.pending = null;
+    const cur = p.img();
+    if (!p.userView && (prev.rows !== cur.rows || prev.cols !== cur.cols || aspect(prev) !== aspect(cur))) p.view = null;
+    p.dirty = true;
+    if (user) syncFrom(p);
+    redrawAll();
+  }
+  // Scrolling one pane moves panes with the same plane orientation to the matching position
+  function syncFrom(p) {
+    if (!S.link) return;
+    const im = p.img(), g = geom(im);
+    if (!g) return;
+    const C = toPatient(g, im.cols / 2, im.rows / 2);
+    visiblePanes().forEach((q) => {
+      if (q === p || !q.series) return;
+      const gq = geom(q.img());
+      if (!gq || Math.abs(dot(g.N, gq.N)) < 0.98) return;
+      const nb = nearest(q.series, C);
+      if (nb && nb.d <= tol(q.series)) setIdx(q, nb.i, false);
+    });
+  }
+  // Crosshair: a point in one pane moves every other pane to the slice through that point
+  function crossAt(p, ip) {
+    const im = p.img(), g = geom(im);
+    if (!g) { hint('В этом файле нет данных о положении среза в пространстве'); return false; }
+    S.cursor = toPatient(g, ip.x, ip.y);
+    visiblePanes().forEach((q) => {
+      if (q === p || !q.series) return;
+      const nb = nearest(q.series, S.cursor);
+      if (nb && nb.d <= tol(q.series)) setIdx(q, nb.i, false);
+    });
+    redrawAll();
+    return true;
+  }
+
+  function setActive(p) {
+    if (S.active === p.i) return;
+    S.active = p.i;
+    S.panes.forEach((x) => x.el.classList.toggle('active', x === p));
+    syncStrip(); syncPreset(); updateNav();
+  }
+  function assign(p, s) {
+    p.series = s;
+    p.idx = s ? Math.floor((s.images.length - 1) / 2) : 0;
+    p.view = null; p.userView = false; p.dirty = true;
+    if (S.draft && S.draft.pane === p) S.draft = null;
+    if (S.pending && S.pending.pane === p) S.pending = null;
+    redrawAll();
+    syncStrip();
+    if (p === activePane()) { syncPreset(); updateNav(); }
+  }
+  function setLayout(n) {
+    S.layout = n;
+    panesEl.dataset.n = n;
+    S.panes.forEach((p, i) => p.el.classList.toggle('hidden', i >= n));
+    for (let i = 0; i < n; i++) if (!S.panes[i].series) assign(S.panes[i], pickFor(i));
+    if (S.active >= n) setActive(S.panes[0]);
+    S.panes.forEach((x) => x.el.classList.toggle('active', x.i === S.active));
+    document.querySelectorAll('[data-layout]').forEach((b) => b.setAttribute('aria-pressed', String(+b.dataset.layout === n)));
+    syncStrip();
+    S.panes.forEach((p) => { p.view = p.userView ? p.view : null; });
+    redrawAll();
+  }
+  // Series for an empty pane: prefer a plane that is not on screen yet
+  function pickFor(i) {
+    const shown = visiblePanes().map((p) => p.series).filter(Boolean);
+    const shownCls = new Set(shown.map((s) => s.cls));
+    const free = S.series.filter((s) => !shown.includes(s));
+    return free.find((s) => s.cls && !shownCls.has(s.cls) && !s.mpr) || free.find((s) => s.cls && !shownCls.has(s.cls)) || free[0] || S.series[0] || null;
+  }
+  function bestOf(cls) {
+    const c = S.series.filter((s) => s.cls === cls);
+    const acq = c.filter((s) => !s.mpr && s.images.length >= 3).sort((a, b) => b.images.length - a.images.length);
+    const mpr = c.filter((s) => s.mpr).sort((a, b) => b.images.length - a.images.length);
+    return acq[0] || mpr[0] || null;
+  }
+  function autoLayout() {
+    const chosen = ['sag', 'ax', 'cor'].map(bestOf).filter(Boolean);
+    if (chosen.length < 2) {
+      hint('Нужны серии в разных плоскостях или тонкие срезы (до 3,5 мм), чтобы построить остальные проекции', 5000);
+      return;
+    }
+    chosen.forEach((s, i) => assign(S.panes[i], s));
+    setLayout(chosen.length);
+    setActive(S.panes[0]);
+    const p0 = S.panes[0], im = p0.img();
+    crossAt(p0, { x: im.cols / 2, y: im.rows / 2 });
+    setTool('cross');
+  }
+
+  // ---------- tools ----------
+  function setTool(t) {
+    S.tool = t;
+    S.draft = null; S.pending = null;
+    document.querySelectorAll('[data-tool]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === t)));
+    if (t === 'cobb') hint('Проведите линию вдоль первой замыкательной пластинки', 4000);
+    else if (t === 'ruler') hint('Проведите линию, чтобы измерить расстояние', 3000);
+    else if (t === 'cross') hint(S.layout > 1 ? 'Коснитесь точки: другие проекции перейдут к ней' : 'Откройте 2 или 3 окна, чтобы связать проекции', 3500);
+    else hint('');
+    redrawAll();
+  }
+  function cancelDraft() {
+    S.draft = null;
+    if (S.pending) { S.pending = null; hint('Измерение отменено'); }
+    redrawAll();
+  }
+
+  const ptrs = new Map();
+  let g = null;
+  function bindInput(p) {
+    const cv = p.canvas;
+    const local = (e) => { const r = cv.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+    cv.addEventListener('contextmenu', (e) => e.preventDefault());
+    cv.addEventListener('pointerdown', (e) => {
+      if (g && g.pane !== p) return;
+      setActive(p);
+      if (!p.img()) return;
+      cv.setPointerCapture(e.pointerId);
+      const pt = local(e);
+      ptrs.set(e.pointerId, pt);
+      if (ptrs.size === 2) {
+        if (S.draft && S.draft.pane === p) S.draft = null;
+        const [a, b] = [...ptrs.values()];
+        g = { pane: p, pinch: true, d0: Math.hypot(a.x - b.x, a.y - b.y) || 1, m0: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, v0: { ...p.view } };
+        redraw(p);
+        return;
+      }
+      if (ptrs.size > 2) return;
+      const tool = e.button === 2 ? 'wl' : e.button === 1 ? 'pan' : S.tool;
+      g = { pane: p, tool, start: pt, last: pt, acc: 0 };
+      if (tool === 'cross') crossAt(p, toImg(p, pt.x, pt.y));
+      if (tool === 'ruler' || tool === 'cobb') {
+        const ip = toImg(p, pt.x, pt.y);
+        if (tool === 'cobb' && S.pending && S.pending.im === p.img()) S.draft = { pane: p, mark: { type: 'cobb', pts: [...S.pending.mark.pts, ip, { ...ip }] } };
+        else { S.pending = null; S.draft = { pane: p, mark: { type: tool, pts: [ip, { ...ip }] } }; }
+        redraw(p);
+      }
+    });
+    cv.addEventListener('pointermove', (e) => {
+      if (!ptrs.has(e.pointerId) || !g || g.pane !== p) return;
+      const pt = local(e);
+      ptrs.set(e.pointerId, pt);
+      const im = p.img();
+      if (g.pinch) {
+        if (ptrs.size < 2) return;
+        const [a, b] = [...ptrs.values()];
+        const d = Math.hypot(a.x - b.x, a.y - b.y), m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+        const asp = aspect(im), s = Math.min(Math.max(g.v0.scale * d / g.d0, 0.02), 60);
+        const ix = (g.m0.x - g.v0.tx) / g.v0.scale, iy = (g.m0.y - g.v0.ty) / (g.v0.scale * asp);
+        p.view = { scale: s, tx: m.x - ix * s, ty: m.y - iy * s * asp };
+        p.userView = true;
+        redraw(p);
+        return;
+      }
+      const dx = pt.x - g.last.x, dy = pt.y - g.last.y;
+      g.last = pt;
+      switch (g.tool) {
+        case 'scroll': {
+          g.acc += dy;
+          while (Math.abs(g.acc) >= 10) { setIdx(p, p.idx + Math.sign(g.acc), true); g.acc -= Math.sign(g.acc) * 10; }
+          break;
+        }
+        case 'wl': {
+          if (im.isColor) break;
+          const [lo, hi] = DicomCore.range(im);
+          const k = Math.max((hi - lo) / 600, 0.25);
+          const wl = { ...getWL(p.series, im) };
+          wl.ww = Math.max(1, wl.ww + dx * k);
+          wl.wc += dy * k;
+          const own = wlOwner(p.series);
+          own.wl = wl; own.presetName = 'custom';
+          $('#preset').value = 'custom';
+          redrawSeries(p.series);
+          break;
+        }
+        case 'pan': p.view.tx += dx; p.view.ty += dy; p.userView = true; redraw(p); break;
+        case 'zoom': zoomAt(p, g.start.x, g.start.y, Math.exp(-dy * 0.008)); break;
+        case 'cross': crossAt(p, toImg(p, pt.x, pt.y)); break;
+        case 'ruler': case 'cobb':
+          if (S.draft) { const pts = S.draft.mark.pts; pts[pts.length - 1] = toImg(p, pt.x, pt.y); redraw(p); }
+          break;
+      }
+    });
+    const end = (e) => {
+      if (!ptrs.has(e.pointerId)) return;
+      ptrs.delete(e.pointerId);
+      if (!g || g.pane !== p) return;
+      if (g.pinch) { if (ptrs.size === 0) g = null; return; }
+      if (S.draft && S.draft.pane === p && (g.tool === 'ruler' || g.tool === 'cobb')) {
+        const im = p.img(), d = S.draft.mark, n = d.pts.length;
+        const a = toScr(p, d.pts[n - 2]), b = toScr(p, d.pts[n - 1]);
+        const ok = Math.hypot(a.x - b.x, a.y - b.y) >= 6;
+        if (d.type === 'ruler') { if (ok) (im.marks = im.marks || []).push(d); }
+        else if (n === 2) { if (ok) { S.pending = { pane: p, im, mark: d }; hint('Теперь проведите линию вдоль второй пластинки', 4000); } }
+        else if (ok) {
+          (im.marks = im.marks || []).push(d); S.pending = null;
+          hint(`Угол Кобба ${round(angleDeg(im, ...d.pts), 1)}°`, 3000);
+        }
+        S.draft = null;
+        redraw(p);
+      }
+      g = null;
+    };
+    cv.addEventListener('pointerup', end);
+    cv.addEventListener('pointercancel', end);
+    let wheelAcc = 0;
+    cv.addEventListener('wheel', (e) => {
+      if (!p.img()) return;
+      e.preventDefault();
+      setActive(p);
+      const pt = local(e);
+      const dy = e.deltaY * (e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 400 : 1);
+      if (e.ctrlKey || e.metaKey) { zoomAt(p, pt.x, pt.y, Math.exp(-dy * 0.01)); return; }
+      if (Math.abs(dy) >= 40) { setIdx(p, p.idx + Math.sign(dy), true); wheelAcc = 0; return; }
+      wheelAcc += dy;
+      while (Math.abs(wheelAcc) >= 30) { setIdx(p, p.idx + Math.sign(wheelAcc), true); wheelAcc -= Math.sign(wheelAcc) * 30; }
+    }, { passive: false });
+  }
+  function zoomAt(p, x, y, f) {
+    const v = p.view, asp = aspect(p.img());
+    const s = Math.min(Math.max(v.scale * f, 0.02), 60);
+    const ix = (x - v.tx) / v.scale, iy = (y - v.ty) / (v.scale * asp);
+    p.view = { scale: s, tx: x - ix * s, ty: y - iy * s * asp };
+    p.userView = true;
+    redraw(p);
+  }
+
+  document.addEventListener('keydown', (e) => {
+    const p = activePane();
+    if (!p || !p.img() || $('#infoDlg').open) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') && e.key !== 'Escape') return;
+    const k = e.key;
+    if (k === 'ArrowUp' || k === 'ArrowLeft') { setIdx(p, p.idx - 1, true); e.preventDefault(); }
+    else if (k === 'ArrowDown' || k === 'ArrowRight') { setIdx(p, p.idx + 1, true); e.preventDefault(); }
+    else if (k === 'PageUp') setIdx(p, p.idx - 10, true);
+    else if (k === 'PageDown') setIdx(p, p.idx + 10, true);
+    else if (k === 'Home') setIdx(p, 0, true);
+    else if (k === 'End') setIdx(p, p.series.images.length - 1, true);
+    else if (k === 'Escape') cancelDraft();
+    else if (k === 'Delete' || k === 'Backspace') { const im = p.img(); if (im.marks && im.marks.length) { im.marks.pop(); redraw(p); } }
+    else if ('iIшШ'.includes(k)) toggleInvert();
+    else if ('rRкК'.includes(k)) reset();
+    else if ('123'.includes(k) && S.series.length) setLayout(+k);
+  });
+
+  // ---------- toolbar ----------
+  document.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
+  document.querySelectorAll('[data-layout]').forEach((b) => b.addEventListener('click', () => setLayout(+b.dataset.layout)));
+  $('#autoBtn').addEventListener('click', autoLayout);
+  $('#linkBtn').addEventListener('click', () => {
+    S.link = !S.link;
+    $('#linkBtn').setAttribute('aria-pressed', String(S.link));
+    hint(S.link ? 'Листание связано: окна в одной плоскости идут вместе' : 'Окна листаются независимо', 2500);
+    if (S.link) syncFrom(activePane());
+  });
+  function toggleInvert() {
+    S.invert = !S.invert;
+    $('#invertBtn').setAttribute('aria-pressed', String(S.invert));
+    redrawAll(true);
+  }
+  function reset() {
+    const p = activePane();
+    if (!p.series) return;
+    const own = wlOwner(p.series);
+    own.wl = null; own.presetName = null;
+    S.invert = false; S.cursor = null;
+    $('#invertBtn').setAttribute('aria-pressed', 'false');
+    syncPreset();
+    visiblePanes().forEach((q) => { q.view = null; q.userView = false; });
+    redrawAll(true);
+  }
+  function syncPreset() {
+    const p = activePane(), sel = $('#preset');
+    const own = p.series && wlOwner(p.series);
+    sel.value = own && own.presetName ? own.presetName : 'file';
+    sel.disabled = !!(p.img() && p.img().isColor);
+  }
+  $('#invertBtn').addEventListener('click', toggleInvert);
+  $('#resetBtn').addEventListener('click', reset);
+  $('#clearBtn').addEventListener('click', () => {
+    const p = activePane(), im = p.img();
+    if (!im) return;
+    const had = (im.marks && im.marks.length) || S.pending || S.cursor;
+    im.marks = []; S.pending = null; S.draft = null; S.cursor = null;
+    redrawAll();
+    hint(had ? 'Разметка стёрта' : 'На этом срезе нет разметки', 1800);
+  });
+  $('#preset').addEventListener('change', (e) => {
+    const p = activePane();
+    if (!p.series) return;
+    const own = wlOwner(p.series), v = e.target.value;
+    if (v === 'file') { own.wl = null; own.presetName = null; }
+    else if (v === 'auto') { own.wl = autoWL(p.img()); own.presetName = 'auto'; }
+    else if (v !== 'custom') { const [c, w] = v.split(',').map(Number); own.wl = { wc: c, ww: w }; own.presetName = v; }
+    redrawSeries(p.series);
+  });
+  $('#slider').addEventListener('input', (e) => setIdx(activePane(), +e.target.value, true));
+  $('#prev').addEventListener('click', () => setIdx(activePane(), activePane().idx - 1, true));
+  $('#next').addEventListener('click', () => setIdx(activePane(), activePane().idx + 1, true));
+
+  // ---------- info dialog ----------
+  $('#infoBtn').addEventListener('click', () => { fillInfo(); $('#infoDlg').showModal(); });
+  $('#closeInfo').addEventListener('click', () => $('#infoDlg').close());
+  $('#infoDlg').addEventListener('click', (e) => { if (e.target === $('#infoDlg')) $('#infoDlg').close(); });
+  $('#phi').addEventListener('change', (e) => {
+    S.hidePHI = e.target.checked;
+    try { localStorage.setItem('dicom-hide-phi', S.hidePHI ? '1' : '0'); } catch (_) {}
+    fillInfo(); redrawAll();
+  });
+  try { S.hidePHI = localStorage.getItem('dicom-hide-phi') === '1'; $('#phi').checked = S.hidePHI; } catch (_) {}
+  function fillInfo() {
+    const p = activePane(), im = p && p.img();
+    if (!im) { $('#infoBody').innerHTML = '<p>Исследование пока не открыто.</p>'; return; }
+    const m = im.meta, hide = (v) => (S.hidePHI ? 'скрыто' : v);
+    const sexes = { M: 'мужской', F: 'женский', O: 'другой' };
+    const rows = [
+      ['Пациент', hide(m.patientName)], ['ID пациента', hide(m.patientId)], ['Дата рождения', hide(fmtDate(m.birthDate))],
+      ['Пол', sexes[m.sex] || m.sex], ['Дата исследования', fmtDate(m.studyDate)], ['Исследование', m.studyDesc],
+      ['Серия', p.series.label], ['Плоскость', p.series.cls ? CLS_NAME[p.series.cls] : ''],
+      ['Модальность', m.modality], ['Область', m.bodyPart], ['Учреждение', hide(m.institution)], ['Аппарат', m.manufacturer],
+      ['Матрица', `${im.cols} × ${im.rows}`],
+      ['Размер пикселя', im.colSpacing ? `${round(im.rowSpacing, 3)} × ${round(im.colSpacing, 3)} мм${im.spacingSource === 'detector' ? ' (детектор)' : ''}` : ''],
+      ['Толщина среза', m.sliceThickness ? `${round(m.sliceThickness, 2)} мм` : ''], ['Срезов в серии', String(p.series.images.length)],
+      ['kVp', m.kvp], ['TR / TE', m.tr || m.te ? `${m.tr || '–'} / ${m.te || '–'} мс` : ''],
+      ['Формат данных', m.transferSyntax],
+      ['Файл', p.series.mpr ? '' : m.fileName + (im.frameCount > 1 ? `, кадр ${im.frame + 1} из ${im.frameCount}` : '')]
+    ].filter((r) => r[1]);
+    $('#infoBody').innerHTML = '<table>' + rows.map((r) => `<tr><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join('') + '</table>';
+  }
+
+  // ---------- file input ----------
+  const fileIn = $('#fileIn'), dirIn = $('#dirIn');
+  if (!('webkitdirectory' in dirIn) || /iPhone|iPad|Android/i.test(navigator.userAgent)) {
+    document.querySelectorAll('.dirpick').forEach((el) => el.classList.add('hidden'));
+  }
+  fileIn.addEventListener('change', () => { const f = [...fileIn.files]; fileIn.value = ''; if (f.length) loadFiles(f); });
+  dirIn.addEventListener('change', () => { const f = [...dirIn.files]; dirIn.value = ''; if (f.length) loadFiles(f); });
+  ['dragenter', 'dragover'].forEach((t) => document.addEventListener(t, (e) => { e.preventDefault(); empty.classList.add('drag'); }));
+  document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) empty.classList.remove('drag'); });
+  document.addEventListener('drop', async (e) => {
+    e.preventDefault(); empty.classList.remove('drag');
+    const items = e.dataTransfer.items ? [...e.dataTransfer.items] : [];
+    const entries = items.map((it) => (it.webkitGetAsEntry ? it.webkitGetAsEntry() : null));
+    if (entries.some(Boolean)) {
+      const files = [];
+      const walk = async (en) => {
+        if (!en) return;
+        if (en.isFile) { try { files.push(await new Promise((res, rej) => en.file(res, rej))); } catch (_) {} }
+        else if (en.isDirectory) {
+          const r = en.createReader();
+          let batch;
+          do { batch = await new Promise((res, rej) => r.readEntries(res, rej)); for (const x of batch) await walk(x); } while (batch.length);
+        }
+      };
+      hint('Читаю папку…', 0);
+      for (const en of entries) await walk(en);
+      loadFiles(files);
+    } else loadFiles([...(e.dataTransfer.files || [])]);
+  });
+
+  const SKIP_EXT = /\.(jpe?g|png|gif|bmp|txt|html?|xml|pdf|exe|dll|inf|ini|js|css|ico|json|lnk|bat|cmd|sys|cab|msi|dat|log|cfg|jar|class|mp4|avi|plist|ds_store|db)$/i;
+  const OTHER_ARCHIVE = /\.(rar|7z|tar|gz|tgz|bz2|xz)$/i;
+  const baseName = (n) => n.split('/').pop();
+  const skipName = (n) => SKIP_EXT.test(n) || baseName(n).toUpperCase() === 'DICOMDIR' || baseName(n).startsWith('.');
+
+  // Turn picked files (and ZIP archives inside them) into a flat list of candidate DICOM sources
+  async function expand(files, rep) {
+    const out = [];
+    for (const f of files) {
+      const nm = f.webkitRelativePath || f.name;
+      let zip = false;
+      try { zip = await ZipReader.isZip(f); } catch (_) {}
+      if (zip) { rep.archives++; await expandZip(f, nm, out, rep, 0); continue; }
+      if (OTHER_ARCHIVE.test(nm)) { rep.otherArchive++; continue; }
+      if (f.size <= 128 || skipName(nm)) continue;
+      out.push({ name: nm, read: () => f.arrayBuffer() });
+    }
+    return out;
+  }
+  async function expandZip(blob, zname, out, rep, depth) {
+    let entries;
+    try { entries = await ZipReader.list(blob); } catch (_) { rep.badZip++; return; }
+    for (const en of entries) {
+      const nm = zname + '/' + en.name;
+      if (/\.zip$/i.test(en.name) && depth < 2) {
+        try { const ab = await ZipReader.read(blob, en); await expandZip(new Blob([ab]), nm, out, rep, depth + 1); } catch (_) { rep.badZip++; }
+        continue;
+      }
+      if (OTHER_ARCHIVE.test(en.name)) { rep.otherArchive++; continue; }
+      if (en.usize <= 128 || skipName(en.name)) continue;
+      out.push({ name: nm, read: () => ZipReader.read(blob, en) });
+    }
+  }
+  function explain(msg) {
+    if (msg === 'not-dicom' || /Offset is outside|out of bounds|RangeError/i.test(msg)) return 'не DICOM';
+    if (msg === 'no-pixels') return 'без изображения (DICOMDIR, отчёты)';
+    if (msg === 'unsupported:palette') return 'палитровый цвет не поддерживается';
+    if (msg === 'unsupported:deflate') return 'сжатие Deflate не поддерживается';
+    if (msg.startsWith('unsupported:')) return `сжатие ${msg.slice(12)} не поддерживается`;
+    if (msg === 'zip-encrypted') return 'архив защищён паролем';
+    if (msg === 'zip-method') return 'необычный метод сжатия в архиве';
+    return 'не удалось прочитать изображение';
+  }
+
+  let loading = false;
+  // Status line: inside the start screen while it is visible, otherwise a toast
+  function status(text, isError) {
+    const el = $('#status');
+    if (!empty.classList.contains('hidden')) {
+      el.textContent = text; el.classList.toggle('err', !!isError); el.classList.toggle('hidden', !text);
+      hint('');
+    } else if (text) hint(text, isError ? 6000 : 0); else hint('');
+  }
+
+
+  async function loadFiles(files) {
+    if (loading) { hint('Дождитесь окончания загрузки'); return; }
+    loading = true;
+    status('Читаю файлы…');
+    const rep = { archives: 0, badZip: 0, otherArchive: 0 };
+    let sources = [];
+    try { sources = await expand(files, rep); } catch (e) { rep.badZip++; }
+    if (!sources.length) {
+      loading = false;
+      let msg = 'Среди выбранного нет файлов DICOM.';
+      if (rep.otherArchive) msg = 'Архивы RAR, 7z и TAR не поддерживаются. Пересохраните снимки в ZIP.';
+      else if (rep.badZip) msg = 'Не удалось прочитать архив. Возможно, он повреждён или загружен не полностью.';
+      else if (rep.archives) msg = 'В архиве не нашлось файлов DICOM.';
+      status(msg, true);
+      return;
+    }
+    const acquired = S.series.filter((s) => !s.mpr);
+    const bySeries = new Map(acquired.map((s) => [s.uid, s]));
+    const errors = {};
+    const t0 = performance.now();
+    for (let i = 0; i < sources.length; i++) {
+      if (performance.now() - t0 > 300 && i % 4 === 0) { status(`${rep.archives ? 'Распаковка' : 'Загрузка'}: ${i} из ${sources.length}`); await new Promise((r) => setTimeout(r, 0)); }
+      const f = sources[i];
+      try {
+        const images = await DicomCore.load(await f.read(), f.name);
+        const uid = images[0].meta.seriesUID + (images[0].frameCount > 1 ? '#' + f.name : '');
+        let s = bySeries.get(uid);
+        if (!s) {
+          const m = images[0].meta;
+          s = { uid, images: [], wl: null, number: parseInt(m.seriesNumber, 10), mpr: null,
+            label: m.seriesDesc || [m.modality, m.seriesNumber && 'серия ' + m.seriesNumber].filter(Boolean).join(', ') || baseName(f.name) };
+          bySeries.set(uid, s);
+        }
+        s.images.push(...images);
+        s._vol = undefined; s._spacing = null;
+      } catch (err) {
+        const r = explain(String((err && err.message) || err));
+        errors[r] = (errors[r] || 0) + 1;
+      }
+    }
+    loading = false;
+    const list = [...bySeries.values()].filter((s) => s.images.length);
+    list.forEach(sortSeries);
+    list.sort((a, b) => (isNaN(a.number) ? 1e9 : a.number) - (isNaN(b.number) ? 1e9 : b.number));
+    // Planes and reconstructions
+    const all = [];
+    list.forEach((s) => {
+      const g0 = geom(s.images[0]);
+      s.cls = g0 ? planeClass(g0.N) : null;
+      all.push(s);
+      if (volumeInfo(s)) ['r', 'c'].forEach((ax) => { const m = buildMPR(s, ax); if (m) all.push(m); });
+    });
+    S.series = all;
+    S.panes.forEach((p) => { if (p.series) { const same = all.find((s) => s.uid === p.series.uid); p.series = same || null; if (!same) p.idx = 0; p.dirty = true; } });
+    if (rep.otherArchive) errors['архивы RAR/7z/TAR не поддерживаются'] = rep.otherArchive;
+    if (rep.badZip) errors['повреждённый архив'] = rep.badZip;
+    const skipped = Object.entries(errors).map(([r, c]) => `${c} — ${r}`).join('; ');
+    if (!S.series.length) { status('Не удалось открыть: ' + (skipped || 'нет изображений'), true); return; }
+    status('');
+    const firstLoad = empty.classList.contains('hidden') === false;
+    empty.classList.add('hidden');
+    $('#tools').classList.remove('hidden');
+    $('#layoutSeg').classList.remove('hidden');
+    buildStrip();
+    if (firstLoad || !S.panes[0].series) {
+      const acq = S.series.filter((s) => !s.mpr);
+      assign(S.panes[0], acq.reduce((a, b) => (b.images.length > a.images.length ? b : a)));
+    }
+    setLayout(S.layout);
+    if (firstLoad) setTool(S.panes[0].series.images.length > 1 ? 'scroll' : 'wl');
+    const total = S.series.filter((s) => !s.mpr).reduce((a, s) => a + s.images.length, 0);
+    const multiPlane = new Set(S.series.map((s) => s.cls).filter(Boolean)).size > 1;
+    let msg = `Открыто снимков: ${total}` + (skipped ? `. Пропущено: ${skipped}` : '');
+    if (multiPlane && S.layout === 1) msg += '. Нажмите «Проекции», чтобы открыть их рядом';
+    hint(msg, skipped || multiPlane ? 6000 : 2500);
+  }
+  function sortSeries(s) {
+    const im0 = s.images[0];
+    if (im0.frameCount > 1 && s.images.every((x) => x.meta.fileName === im0.meta.fileName)) return;
+    let normal = null;
+    if (im0.orientation) {
+      const o = im0.orientation;
+      normal = [o[1] * o[5] - o[2] * o[4], o[2] * o[3] - o[0] * o[5], o[0] * o[4] - o[1] * o[3]];
+    }
+    const key = (x) => (normal && x.position ? x.position[0] * normal[0] + x.position[1] * normal[1] + x.position[2] * normal[2] : null);
+    const allPos = normal && s.images.every((x) => x.position);
+    s.images.sort((a, b) => {
+      if (allPos) { const d = key(a) - key(b); if (Math.abs(d) > 1e-4) return d; }
+      if (a.instance != null && b.instance != null && a.instance !== b.instance) return a.instance - b.instance;
+      if (a.meta.fileName !== b.meta.fileName) return a.meta.fileName.localeCompare(b.meta.fileName, undefined, { numeric: true });
+      return a.frame - b.frame;
+    });
+  }
+
+  function syncStrip() {
+    document.querySelectorAll('.series').forEach((b) => {
+      const s = b._series;
+      b.setAttribute('aria-pressed', String(activePane().series === s));
+      const dots = visiblePanes().filter((p) => p.series === s).map((p) => `<i style="background:${COLORS[p.i]}"></i>`).join('');
+      b.querySelector('.sdots').innerHTML = S.layout > 1 ? dots : '';
+    });
+  }
+  function buildStrip() {
+    const strip = $('#strip');
+    strip.innerHTML = '';
+    if (S.series.length < 2) return;
+    S.series.forEach((s) => {
+      const b = document.createElement('button');
+      b.className = 'series'; b.type = 'button'; b._series = s;
+      const c = document.createElement('canvas');
+      c.width = 88; c.height = 88;
+      const t = document.createElement('div');
+      const sub2 = s.mpr ? `МПР, ${s.images.length} ${plural(s.images.length)}` : `${s.images.length} ${plural(s.images.length)}`;
+      t.innerHTML = `<span>${esc(s.label)}</span><small>${sub2}</small>`;
+      const dots = document.createElement('span');
+      dots.className = 'sdots';
+      b.append(c, t, dots);
+      b.addEventListener('click', () => assign(activePane(), s));
+      strip.append(b);
+      setTimeout(() => thumb(s, c), 0);
+    });
+    syncStrip();
+  }
+  function plural(n) {
+    const a = n % 10, b = n % 100;
+    if (a === 1 && b !== 11) return 'снимок';
+    if (a >= 2 && a <= 4 && (b < 12 || b > 14)) return 'снимка';
+    return 'снимков';
+  }
+
+  function thumb(s, c) {
+    const im = s.images[Math.floor((s.images.length - 1) / 2)];
+    const tc = document.createElement('canvas');
+    tc.width = im.cols; tc.height = im.rows;
+    const tctx = tc.getContext('2d');
+    const d = tctx.createImageData(im.cols, im.rows);
+    paint(s, im, d, false);
+    tctx.putImageData(d, 0, 0);
+    const x = c.getContext('2d');
+    x.fillStyle = '#000'; x.fillRect(0, 0, c.width, c.height);
+    const asp = aspect(im), sc = Math.min(c.width / im.cols, c.height / (im.rows * asp));
+    const w = im.cols * sc, h = im.rows * asp * sc;
+    x.imageSmoothingQuality = 'high';
+    x.drawImage(tc, (c.width - w) / 2, (c.height - h) / 2, w, h);
+  }
+
+  // ---------- start ----------
+  for (let i = 0; i < 3; i++) S.panes.push(makePane(i));
+  S.panes[0].el.classList.add('active');
+  setLayout(1);
+  setTool('scroll');
+  hint('');
+})();
+
+</script>
+<script>
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
