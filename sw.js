@@ -1,5 +1,5 @@
 // Offline support: the app shell is cached; pages come from the network first so updates arrive.
-const CACHE = 'dicom-viewer-v1';
+const CACHE = 'dicom-viewer-v3';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));

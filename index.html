@@ -195,7 +195,7 @@ kbd { font-family: inherit; font-size: 12px; border: 1px solid var(--line); bord
   <button class="tool" data-tool="ruler" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="m3 16.5 13.5-13.5 4.5 4.5L7.5 21z"/><path d="m7 12.5 2 2M10 9.5l2 2M13 6.5l2 2" stroke-linecap="round"/></svg>Линейка</button>
   <button class="tool" data-tool="cobb" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 6.5 21 4M3 20l18-5.5"/><path d="M14 5a6 6 0 0 1 1 5" stroke-dasharray="2 2"/></svg>Угол Кобба</button>
   <span class="sep"></span>
-  <button class="tool" id="autoBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3" y="3" width="18" height="9" rx="1.5"/><rect x="3" y="14" width="8" height="7" rx="1.5"/><rect x="13" y="14" width="8" height="7" rx="1.5"/></svg>Проекции</button>
+  <button class="tool" id="autoBtn" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 3 20 7.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg>МПР</button>
   <button class="tool" id="linkBtn" type="button" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>Связь</button>
   <span class="sep"></span>
   <label class="presetwrap">Окно
@@ -227,10 +227,10 @@ kbd { font-family: inherit; font-size: 12px; border: 1px solid var(--line); bord
       <li>Колесо мыши или стрелки <kbd>↑</kbd> <kbd>↓</kbd> листают срезы, <kbd>Ctrl</kbd> + колесо меняет масштаб.</li>
       <li>Правая кнопка мыши всегда меняет окно, средняя сдвигает изображение.</li>
       <li>На телефоне двумя пальцами можно увеличивать и сдвигать изображение.</li>
-      <li>Проекции: открывает рядом сагиттальную, аксиальную и корональную плоскости. Цветная линия на снимке показывает, где проходит срез из окна того же цвета.</li>
+      <li>МПР: строит из КТ (или тонких срезов МРТ) сагиттальную, аксиальную и корональную плоскости и открывает их рядом. Работает и при наклоне гентри, пропущенных срезах и топограмме внутри серии. Цветная линия на снимке показывает, где проходит срез из окна того же цвета.</li>
       <li>Прицел: коснитесь точки на любом снимке, и остальные окна перейдут к срезу через эту точку. Её положение отмечено розовым крестиком.</li>
       <li>Связь: окна в одной плоскости (например, T1 и T2 сагиттально) листаются вместе.</li>
-      <li>Если в исследовании есть только тонкие срезы (до 3,5 мм) в одной плоскости, остальные плоскости строятся автоматически (МПР). Клавиши <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> переключают число окон.</li>
+      <li>Для аксиальной КТ реконструкции появляются в списке серий автоматически. Если серия с толстыми срезами, МПР всё равно строится, но будет менее детальной. Клавиши <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> переключают число окон, <kbd>M</kbd> включает МПР.</li>
       <li>Угол Кобба: проведите линию вдоль первой замыкательной пластинки, затем вдоль второй. <kbd>Esc</kbd> отменяет, <kbd>Del</kbd> удаляет последнюю разметку.</li>
       <li>Размеры считаются по Pixel Spacing. Значок ≈ означает, что есть только шаг детектора (рентген): реальный размер обычно чуть меньше из-за увеличения.</li>
     </ul>
@@ -368,6 +368,10 @@ const DicomCore = (() => {
     'GB18030': 'gb18030', 'GBK': 'gbk'
   };
   const isUpper = (c) => c >= 65 && c <= 90;
+  // Enhanced (multi-frame) objects keep geometry in functional group sequences
+  const FG = new Set([0x52009229, 0x52009230]);
+  const SQ_TAGS = new Set([0x52009229, 0x52009230, 0x00209113, 0x00209116, 0x00289110, 0x00289145, 0x00289132, 0x00209111, 0x00189301, 0x00189304]);
+  const NESTED = new Set([0x00200032, 0x00200037, 0x00280030, 0x00180050, 0x00281050, 0x00281051, 0x00281052, 0x00281053]);
 
   function parse(buffer) {
     const n = buffer.byteLength;
@@ -405,14 +409,20 @@ const DicomCore = (() => {
     }
     if (ts === '1.2.840.10008.1.2.1.99') throw new Error('unsupported:deflate');
 
-    function walk(p, exp, le, top) {
-      while (p + 8 <= n) {
+    const shared = new Map(), perFrame = [];
+    // depth = number of sequences we are inside; ctx.top = top-level sequence tag, ctx.item = its item index
+    function walk(p, end, exp, le, depth, ctx) {
+      let item = -1;
+      const top = depth === 0;
+      while (p + 8 <= end) {
         const g = dv.getUint16(p, le), e = dv.getUint16(p + 2, le);
         if (g === 0xfffe) {
           const len = dv.getUint32(p + 4, le);
           if (e === 0xe00d || e === 0xe0dd) return p + 8; // item / sequence delimiter
-          if (len === 0xffffffff) p = walk(p + 8, exp, le, false);
-          else p += 8 + len;
+          item++;
+          const ictx = depth === 1 && ctx ? { top: ctx.top, item } : ctx;
+          if (len === 0xffffffff) p = walk(p + 8, n, exp, le, depth, ictx);
+          else { walk(p + 8, Math.min(n, p + 8 + len), exp, le, depth, ictx); p += 8 + len; }
           continue;
         }
         let vr = null, len, hdr;
@@ -439,17 +449,26 @@ const DicomCore = (() => {
           }
           // Undefined-length sequence (UN with undefined length is implicit LE inside)
           const un = vr === 'UN';
-          p = walk(vp, un ? false : exp, un ? true : le, false);
+          p = walk(vp, n, un ? false : exp, un ? true : le, depth + 1, depth === 0 ? { top: key } : ctx);
           continue;
         }
-        if (top && !el.has(key)) el.set(key, { vr, off: vp, len: Math.min(len, n - vp) });
+        const isSQ = vr === 'SQ' || (!exp && SQ_TAGS.has(key));
+        if (isSQ) {
+          if (depth > 0 || FG.has(key)) walk(vp, Math.min(n, vp + len), exp, le, depth + 1, depth === 0 ? { top: key } : ctx);
+        } else if (top) {
+          if (!el.has(key)) el.set(key, { vr, off: vp, len: Math.min(len, n - vp) });
+        } else if (ctx && FG.has(ctx.top) && NESTED.has(key)) {
+          const ref = { vr, off: vp, len: Math.min(len, n - vp) };
+          if (ctx.top === 0x52009229) { if (!shared.has(key)) shared.set(key, ref); }
+          else if (ctx.item >= 0) { (perFrame[ctx.item] = perFrame[ctx.item] || new Map()).set(key, ref); }
+        }
         p = vp + len;
       }
       return p;
     }
-    walk(pos, explicit, little, true);
+    walk(pos, n, explicit, little, 0, null);
     if (el.size < 3) throw new Error('not-dicom');
-    return { buffer, dv, u8, el, ts, little, explicit };
+    return { buffer, dv, u8, el, ts, little, explicit, shared, perFrame };
   }
 
   function rawStr(u8, e) {
@@ -479,8 +498,8 @@ const DicomCore = (() => {
       else { try { s = utf8.decode(bytes); } catch (_) { s = latin.decode(bytes); } }
       return s.replace(/\0/g, '').trim();
     }
-    function nums(key) {
-      const e = ds.el.get(key);
+    function nums(key, map) {
+      const e = (map || ds.el).get(key);
       if (!e || e.len <= 0) return [];
       const vr = e.vr || NUM_VR[key] || 'DS';
       const le = ds.little, dv = ds.dv, out = [];
@@ -494,7 +513,14 @@ const DicomCore = (() => {
       return out;
     }
     const num = (key, def) => { const a = nums(key); return a.length ? a[0] : def; };
-    return { str, nums, num };
+    // Value for one frame: per-frame group, then shared group, then the top-level attribute
+    function frameNums(key, i) {
+      const m = ds.perFrame[i];
+      if (m && m.has(key)) return nums(key, m);
+      if (ds.shared.has(key)) return nums(key, ds.shared);
+      return nums(key);
+    }
+    return { str, nums, num, frameNums };
   }
 
   const TS_NAMES = {
@@ -725,7 +751,24 @@ const DicomCore = (() => {
       position: pos.length === 3 ? pos : null,
       orientation: ori.length === 6 ? ori : null
     };
-    return pixels.map((p, i) => Object.assign({}, base, { pixels: p, frame: i, frameCount: pixels.length }));
+    const enhanced = ds.perFrame.length > 0 || ds.shared.size > 0;
+    return pixels.map((p, i) => {
+      const img = Object.assign({}, base, { pixels: p, frame: i, frameCount: pixels.length });
+      if (enhanced) {
+        const fp = a.frameNums(0x00200032, i), fo = a.frameNums(0x00200037, i), fs = a.frameNums(0x00280030, i);
+        const fsl = a.frameNums(0x00281053, i), fic = a.frameNums(0x00281052, i), fc = a.frameNums(0x00281050, i), fw = a.frameNums(0x00281051, i);
+        const ft = a.frameNums(0x00180050, i);
+        if (fp.length === 3) img.position = fp;
+        if (fo.length === 6) img.orientation = fo;
+        if (fs.length >= 2) { img.rowSpacing = fs[0]; img.colSpacing = fs[1]; img.spacingSource = 'patient'; }
+        if (fsl.length) img.slope = fsl[0] || 1;
+        if (fic.length) img.intercept = fic[0];
+        if (fc.length) img.wc = fc[0];
+        if (fw.length) img.ww = fw[0];
+        if (ft.length) img.meta = Object.assign({}, meta, { sliceThickness: ft[0] });
+      }
+      return img;
+    });
   }
 
   // Pixel value range (modality units) for automatic windowing
@@ -808,13 +851,13 @@ const DicomCore = (() => {
   }
   function spacingOf(s) {
     if (s._spacing != null) return s._spacing;
-    const ims = s.images, g0 = geom(ims[0]);
+    const ims = s.images, st = stackOf(s);
     let sp = null;
-    if (g0 && ims.length > 1) {
+    if (st && st.z.length > 1) {
       const d = [];
-      for (let i = 1; i < ims.length; i++) if (ims[i].position && ims[i - 1].position) d.push(Math.abs(dot(sub(ims[i].position, ims[i - 1].position), g0.N)));
-      const nz = d.filter((x) => x > 0.01).sort((a, b) => a - b);
-      if (nz.length) sp = nz[Math.floor(nz.length / 2)];
+      for (let i = 1; i < st.z.length; i++) d.push(st.z[i] - st.z[i - 1]);
+      d.sort((a, b) => a - b);
+      sp = d[Math.floor(d.length / 2)];
     }
     s._spacing = sp || ims[0].meta.sliceThickness || 3;
     return s._spacing;
@@ -822,9 +865,11 @@ const DicomCore = (() => {
   const tol = (s) => spacingOf(s) * 0.6 + 0.5;
   function nearest(s, P) {
     let best = null;
+    const st = stackOf(s);
+    const inStack = st && st.list.length >= s.images.length / 2 ? new Set(st.list) : null;
     s.images.forEach((im, i) => {
       const g = geom(im);
-      if (!g) return;
+      if (!g || (inStack && !inStack.has(im))) return;
       const d = Math.abs(dot(sub(P, g.O), g.N));
       if (!best || d < best.d) best = { i, d };
     });
@@ -832,31 +877,83 @@ const DicomCore = (() => {
   }
 
   // ---------- volumes and reconstructions (MPR) ----------
-  function volumeInfo(s) {
-    if (s._vol !== undefined) return s._vol;
-    s._vol = null;
-    const ims = s.images;
-    if (s.mpr || ims.length < 20) return null;
-    const i0 = ims[0], g0 = geom(i0);
-    if (!g0) return null;
-    for (const im of ims) {
+  // Main stack of a series: same matrix and plane, sorted along the normal, duplicates removed.
+  // Tolerates localizers mixed into the series, gantry tilt (in-plane shift per slice) and missing slices.
+  function stackOf(s) {
+    if (s._stack !== undefined) return s._stack;
+    s._stack = null;
+    const groups = new Map();
+    s.images.forEach((im) => {
       const g = geom(im);
-      if (!g || im.isColor || im.rows !== i0.rows || im.cols !== i0.cols || Math.abs(dot(g.N, g0.N)) < 0.999) return null;
-    }
-    const z = ims.map((im) => dot(im.position, g0.N));
+      if (!g || im.isColor) return;
+      const key = `${im.rows}x${im.cols}|${g.N.map((v) => Math.round(v * 50)).join(',')}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(im);
+    });
+    let best = null;
+    groups.forEach((list) => { if (!best || list.length > best.length) best = list; });
+    if (!best) return null;
+    const N = geom(best[0]).N;
+    const items = best.map((im) => ({ im, z: dot(im.position, N) })).sort((a, b) => a.z - b.z);
+    const uniq = [];
+    items.forEach((it) => { if (!uniq.length || it.z - uniq[uniq.length - 1].z > 0.01) uniq.push(it); });
+    s._stack = { list: uniq.map((u) => u.im), z: uniq.map((u) => u.z), N };
+    return s._stack;
+  }
+  function volumeReason(s) {
+    if (!s) return 'не выбрана серия';
+    if (s.images.every((im) => !geom(im))) return 'в файлах нет координат срезов';
+    const st = stackOf(s);
+    if (!st || st.list.length < 10) return `мало срезов в серии (${st ? st.list.length : 0}, нужно хотя бы 10)`;
+    return 'срезы расположены слишком неравномерно';
+  }
+  // strict: used to list reconstructions automatically; relaxed: explicit MPR request
+  function volumeInfo(s, relaxed) {
+    const cacheKey = relaxed ? '_volR' : '_vol';
+    if (s[cacheKey] !== undefined) return s[cacheKey];
+    s[cacheKey] = null;
+    if (s.mpr) return null;
+    const st = stackOf(s);
+    if (!st || st.list.length < (relaxed ? 10 : 20)) return null;
+    const ims = st.list, z = st.z, i0 = ims[0], g0 = geom(i0);
     const diffs = [];
     for (let i = 1; i < z.length; i++) diffs.push(z[i] - z[i - 1]);
-    const sorted = diffs.slice().sort((a, b) => a - b), dz = sorted[Math.floor(sorted.length / 2)];
-    if (!(dz > 0.05) || dz > 3.5 || diffs.some((d) => Math.abs(d - dz) > dz * 0.2 + 0.01)) return null;
-    const along = norm(sub(ims[ims.length - 1].position, i0.position));
-    if (dot(along, g0.N) < 0.995) return null; // gantry tilt or irregular stack
+    const sorted = diffs.slice().sort((a, b) => a - b);
+    const dz = sorted[Math.floor(sorted.length / 2)];
+    if (!(dz > 0.05)) return null;
+    const regular = diffs.every((d) => Math.abs(d - dz) <= dz * 0.2 + 0.01);
+    if (!relaxed && (dz > 3.5 || !regular)) return null;
+    const span = z[z.length - 1] - z[0];
+    const K = Math.min(Math.round(span / dz) + 1, 2000);
+    const step = span / Math.max(K - 1, 1);
+    // In-plane offset of each slice relative to the first one (non-zero with gantry tilt)
+    const shC = new Float32Array(ims.length), shR = new Float32Array(ims.length);
+    let tilt = 0;
+    ims.forEach((im, j) => {
+      const d = sub(im.position, i0.position);
+      shC[j] = dot(d, g0.X) / g0.dx; shR[j] = dot(d, g0.Y) / g0.dy;
+      tilt = Math.max(tilt, Math.abs(shC[j]), Math.abs(shR[j]));
+    });
+    // Output slice k -> two nearest source slices and interpolation weight
+    const ja = new Int32Array(K), jb = new Int32Array(K), jt = new Float32Array(K);
+    for (let k = 0, j = 0; k < K; k++) {
+      const zz = z[0] + k * step;
+      while (j < z.length - 2 && z[j + 1] < zz) j++;
+      const a = j, b = Math.min(j + 1, z.length - 1);
+      const t = b === a ? 0 : Math.min(1, Math.max(0, (zz - z[a]) / (z[b] - z[a])));
+      if (t < 0.02) { ja[k] = jb[k] = a; jt[k] = 0; } else if (t > 0.98) { ja[k] = jb[k] = b; jt[k] = 0; } else { ja[k] = a; jb[k] = b; jt[k] = t; }
+    }
     const sameScale = ims.every((im) => im.slope === i0.slope && im.intercept === i0.intercept && im.pixels.constructor === i0.pixels.constructor);
-    s._vol = { O: i0.position, X: g0.X, Y: g0.Y, N: g0.N, dx: g0.dx, dy: g0.dy, dz, C: i0.cols, R: i0.rows, K: ims.length, sameScale };
-    return s._vol;
+    const maxGap = sorted[sorted.length - 1];
+    s[cacheKey] = {
+      ims, O: i0.position, X: g0.X, Y: g0.Y, N: g0.N, dx: g0.dx, dy: g0.dy, dz: step, C: i0.cols, R: i0.rows, K,
+      ja, jb, jt, shC, shR, sameScale, tilted: tilt > 0.5, gaps: maxGap > dz * 1.5
+    };
+    return s[cacheKey];
   }
   const mprCache = [];
-  function buildMPR(src, sAxis) {
-    const v = volumeInfo(src);
+  function buildMPR(src, sAxis, relaxed) {
+    const v = volumeInfo(src, relaxed);
     if (!v) return null;
     const AX = {
       c: { name: 'c', vec: v.X, n: v.C, sp: v.dx },
@@ -870,8 +967,7 @@ const DicomCore = (() => {
     const [rt, dn] = s1 >= s2 ? [a, b] : [b, a];
     const rRev = dot(rt.vec, T[0]) < 0, dRev = dot(dn.vec, T[1]) < 0;
     const sl = AX[sAxis];
-    const unit = { c: [0, 1], r: [0, v.C], k: [1, 0] };
-    const src0 = src.images[0];
+    const src0 = v.ims[0];
     const Ctor = v.sameScale ? src0.pixels.constructor : Float32Array;
     const cols = rt.n, rows = dn.n;
     const vox = (c, r, k) => add(add(add(v.O, mul(v.X, c * v.dx)), mul(v.Y, r * v.dy)), mul(v.N, k * v.dz));
@@ -880,31 +976,51 @@ const DicomCore = (() => {
     const short = { ax: 'Аксиальная МПР', cor: 'Корональная МПР', sag: 'Сагиттальная МПР' }[cls];
     const series = {
       uid: src.uid + '#mpr-' + sAxis, mpr: { src, axis: sAxis }, cls, label, short, number: src.number,
-      images: [], wl: null, _spacing: sl.sp, _vol: null
+      images: [], wl: null, _spacing: sl.sp, _vol: null, _volR: null
     };
-    const meta = Object.assign({}, src0.meta, { seriesDesc: label, sliceThickness: round(sl.sp, 2), transferSyntax: `МПР из серии «${src.label}»` });
+    const note = [v.tilted ? 'наклон гентри скорректирован' : '', v.gaps ? 'пропуски срезов интерполированы' : ''].filter(Boolean).join(', ');
+    const meta = Object.assign({}, src0.meta, { seriesDesc: label, sliceThickness: round(sl.sp, 2), transferSyntax: `МПР из серии «${src.label}»` + (note ? ` (${note})` : '') });
     let vr = null;
     const getRange = () => {
       if (!vr) {
         let mn = Infinity, mx = -Infinity;
-        const step = Math.max(1, Math.floor(src.images.length / 40));
-        for (let k = 0; k < src.images.length; k += step) { const r = DicomCore.range(src.images[k]); if (r[0] < mn) mn = r[0]; if (r[1] > mx) mx = r[1]; }
+        const step = Math.max(1, Math.floor(v.ims.length / 40));
+        for (let k = 0; k < v.ims.length; k += step) { const r = DicomCore.range(v.ims[k]); if (r[0] < mn) mn = r[0]; if (r[1] > mx) mx = r[1]; }
         vr = [mn, mx];
       }
       return vr;
     };
+    // Linear index form of the volume coordinate (c, r, k) for output pixel (i, j) of slice f
+    function lin(ax, f) {
+      const o = { c: [0, 0, 0], r: [0, 0, 0], k: [0, 0, 0] }; // [base, per i, per j]
+      o[sAxis][0] = f;
+      const put = (A, rev, slot) => { if (rev) { o[A.name][0] += A.n - 1; o[A.name][slot] = -1; } else o[A.name][slot] = 1; };
+      put(rt, rRev, 1); put(dn, dRev, 2);
+      return o;
+    }
     function gather(f) {
-      const ru = unit[rt.name], du = unit[dn.name];
-      const rb = rRev ? rt.n - 1 : 0, rs = rRev ? -1 : 1, db = dRev ? dn.n - 1 : 0, ds = dRev ? -1 : 1;
-      const kB = unit[sAxis][0] * f + ru[0] * rb + du[0] * db, oB = unit[sAxis][1] * f + ru[1] * rb + du[1] * db;
-      const ki = ru[0] * rs, oi = ru[1] * rs, kj = du[0] * ds, oj = du[1] * ds;
+      const L = lin(null, f), C = v.C, R = v.R;
       const out = new Ctor(rows * cols);
-      const px = src.images.map((im) => im.pixels);
-      for (let j = 0; j < rows; j++) {
-        let k = kB + kj * j, o = oB + oj * j;
-        const row = j * cols;
-        if (v.sameScale) for (let i = 0; i < cols; i++) { out[row + i] = px[k][o]; k += ki; o += oi; }
-        else for (let i = 0; i < cols; i++) { const im = src.images[k]; out[row + i] = px[k][o] * im.slope + im.intercept; k += ki; o += oi; }
+      const px = v.ims.map((im) => im.pixels);
+      const slopes = v.ims.map((im) => im.slope), icepts = v.ims.map((im) => im.intercept);
+      const fillMod = getRange()[0];
+      const fill = v.sameScale ? (fillMod - src0.intercept) / (src0.slope || 1) : fillMod;
+      const sample = (j, c, r) => {
+        const x = Math.round(c - v.shC[j]), y = Math.round(r - v.shR[j]);
+        if (x < 0 || y < 0 || x >= C || y >= R) return fill;
+        const val = px[j][y * C + x];
+        return v.sameScale ? val : val * slopes[j] + icepts[j];
+      };
+      for (let jj = 0; jj < rows; jj++) {
+        for (let ii = 0; ii < cols; ii++) {
+          const c = L.c[0] + L.c[1] * ii + L.c[2] * jj;
+          const r = L.r[0] + L.r[1] * ii + L.r[2] * jj;
+          const k = L.k[0] + L.k[1] * ii + L.k[2] * jj;
+          const a = v.ja[k], t = v.jt[k];
+          let val = sample(a, c, r);
+          if (t > 0) val = val * (1 - t) + sample(v.jb[k], c, r) * t;
+          out[jj * cols + ii] = val;
+        }
       }
       return out;
     }
@@ -926,8 +1042,11 @@ const DicomCore = (() => {
       Object.defineProperty(im, '_range', { get: getRange, set() {} });
       series.images.push(im);
     }
+    series.note = note;
     return series;
   }
+  // Reconstructions listed automatically: any axial CT stack, or any thin regular stack
+  const autoMPR = (s) => !s.mpr && ((s.images[0].meta.modality === 'CT' && s.cls === 'ax' && volumeInfo(s, true)) || volumeInfo(s, false));
 
   // ---------- window / level ----------
   const wlOwner = (s) => (s.mpr ? s.mpr.src : s);
@@ -1244,18 +1363,52 @@ const DicomCore = (() => {
     const mpr = c.filter((s) => s.mpr).sort((a, b) => b.images.length - a.images.length);
     return acq[0] || mpr[0] || null;
   }
-  function autoLayout() {
+  // Separate acquired series in different planes side by side (fallback when no volume exists)
+  function planesLayout() {
     const chosen = ['sag', 'ax', 'cor'].map(bestOf).filter(Boolean);
-    if (chosen.length < 2) {
-      hint('Нужны серии в разных плоскостях или тонкие срезы (до 3,5 мм), чтобы построить остальные проекции', 5000);
-      return;
-    }
+    if (chosen.length < 2) return false;
     chosen.forEach((s, i) => assign(S.panes[i], s));
     setLayout(chosen.length);
     setActive(S.panes[0]);
     const p0 = S.panes[0], im = p0.img();
     crossAt(p0, { x: im.cols / 2, y: im.rows / 2 });
     setTool('cross');
+    return true;
+  }
+  const ORDER = ['sag', 'ax', 'cor'];
+  const isCT = (s) => s.images[0].meta.modality === 'CT';
+  const rankVol = (a, b) => (isCT(b) - isCT(a)) || ((b.cls === 'ax') - (a.cls === 'ax')) || (stackOf(b).list.length - stackOf(a).list.length);
+  // MPR mode: the chosen volume plus two reconstructions, linked by the crosshair
+  function mprMode() {
+    const p = activePane();
+    let src = p.series ? (p.series.mpr ? p.series.mpr.src : p.series) : null;
+    let swapped = false;
+    if (!src || !volumeInfo(src, true)) {
+      const reason = volumeReason(src);
+      const alt = S.series.filter((s) => !s.mpr && volumeInfo(s, true)).sort(rankVol)[0];
+      if (!alt) {
+        if (planesLayout()) hint(`МПР не построить: ${reason}. Открыла серии в разных плоскостях`, 6000);
+        else hint(`МПР не построить: ${reason}`, 6000);
+        return;
+      }
+      src = alt; swapped = true;
+    }
+    let mprs = S.series.filter((s) => s.mpr && s.mpr.src === src);
+    if (mprs.length < 2) {
+      mprs = ['r', 'c'].map((ax) => buildMPR(src, ax, true)).filter(Boolean);
+      S.series = S.series.filter((s) => !(s.mpr && s.mpr.src === src));
+      S.series.splice(S.series.indexOf(src) + 1, 0, ...mprs);
+      buildStrip();
+    }
+    const trio = [src, ...mprs].sort((a, b) => ORDER.indexOf(a.cls) - ORDER.indexOf(b.cls));
+    trio.forEach((s, i) => assign(S.panes[i], s));
+    setLayout(trio.length);
+    setActive(S.panes[0]);
+    const p0 = S.panes[0], im = p0.img();
+    crossAt(p0, { x: im.cols / 2, y: im.rows / 2 });
+    setTool('cross');
+    const note = mprs[0] && mprs[0].note;
+    hint(`МПР${swapped ? ' из серии «' + src.label + '»' : ''}${note ? ': ' + note : ''}. Коснитесь точки, чтобы перейти к ней во всех плоскостях`, 5500);
   }
 
   // ---------- tools ----------
@@ -1411,12 +1564,13 @@ const DicomCore = (() => {
     else if ('iIшШ'.includes(k)) toggleInvert();
     else if ('rRкК'.includes(k)) reset();
     else if ('123'.includes(k) && S.series.length) setLayout(+k);
+    else if ('mMьЬ'.includes(k) && S.series.length) mprMode();
   });
 
   // ---------- toolbar ----------
   document.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
   document.querySelectorAll('[data-layout]').forEach((b) => b.addEventListener('click', () => setLayout(+b.dataset.layout)));
-  $('#autoBtn').addEventListener('click', autoLayout);
+  $('#autoBtn').addEventListener('click', mprMode);
   $('#linkBtn').addEventListener('click', () => {
     S.link = !S.link;
     $('#linkBtn').setAttribute('aria-pressed', String(S.link));
@@ -1617,7 +1771,7 @@ const DicomCore = (() => {
           bySeries.set(uid, s);
         }
         s.images.push(...images);
-        s._vol = undefined; s._spacing = null;
+        s._vol = undefined; s._volR = undefined; s._stack = undefined; s._spacing = null;
       } catch (err) {
         const r = explain(String((err && err.message) || err));
         errors[r] = (errors[r] || 0) + 1;
@@ -1630,10 +1784,10 @@ const DicomCore = (() => {
     // Planes and reconstructions
     const all = [];
     list.forEach((s) => {
-      const g0 = geom(s.images[0]);
-      s.cls = g0 ? planeClass(g0.N) : null;
+      const st = stackOf(s);
+      s.cls = st ? planeClass(st.N) : null;
       all.push(s);
-      if (volumeInfo(s)) ['r', 'c'].forEach((ax) => { const m = buildMPR(s, ax); if (m) all.push(m); });
+      if (autoMPR(s)) ['r', 'c'].forEach((ax) => { const m = buildMPR(s, ax, true); if (m) all.push(m); });
     });
     S.series = all;
     S.panes.forEach((p) => { if (p.series) { const same = all.find((s) => s.uid === p.series.uid); p.series = same || null; if (!same) p.idx = 0; p.dirty = true; } });
@@ -1656,7 +1810,7 @@ const DicomCore = (() => {
     const total = S.series.filter((s) => !s.mpr).reduce((a, s) => a + s.images.length, 0);
     const multiPlane = new Set(S.series.map((s) => s.cls).filter(Boolean)).size > 1;
     let msg = `Открыто снимков: ${total}` + (skipped ? `. Пропущено: ${skipped}` : '');
-    if (multiPlane && S.layout === 1) msg += '. Нажмите «Проекции», чтобы открыть их рядом';
+    if (multiPlane && S.layout === 1) msg += '. Нажмите «МПР», чтобы открыть три плоскости';
     hint(msg, skipped || multiPlane ? 6000 : 2500);
   }
   function sortSeries(s) {
